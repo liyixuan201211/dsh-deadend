@@ -1,0 +1,27 @@
+# This bundle inserts nothing, deliberately.
+#
+# The plugin's payload is a skill (`skills/deadend/`) plus a CLI that the skill
+# invokes through the normal, visible shell tool. Nothing here runs inside the
+# DSH process.
+#
+# Why: a boot-time `insert` runs code in the DSH process, for every profile,
+# with your full privileges. A tool whose entire subject is "remember what
+# already failed" has no business widening that surface — and the classic
+# failure mode of a bad insert (taking down the boot layer, so that DSH will not
+# start) is precisely the kind of thing this ledger exists to stop people
+# rediscovering.
+#
+# The skill needs no privileges: it tells the agent to run `deadend …` through
+# the shell tool, where each command is visible and can be approved.
+#
+# So this file is present, valid, and inert: it declares the patch path the
+# bundle format expects, and adds nothing to the composed tree.
+#
+# If you are reviewing this plugin before installing it, the complete execution
+# surface is: this file (empty), package.json (no lifecycle scripts), the CLI
+# source in src/, and the SKILL.md prose. You can run the CLI without installing
+# anything:
+#
+#   npx --yes github:liyixuan201211/dsh-deadend --help
+
+[]

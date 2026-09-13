@@ -1,0 +1,71 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: test (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 23.6 is the floor: it is the first release where Node executes
+        # TypeScript directly (type stripping), which this package relies on to
+        # avoid a build step.
+        node: ['23', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install dev dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Test
+        run: npm test
+
+      - name: Typecheck
+        run: npm run typecheck
+
+  demo:
+    name: demo (dogfoods the gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Run the end-to-end demo
+        run: ./examples/demo.sh
+
+      - name: The exit codes are the contract
+        run: |
+          set -u
+          work="$(mktemp -d)"
+          cd "$work"
+          printf '{"name":"gate"}\n' > package.json
+          de() { node "$GITHUB_WORKSPACE/src/cli.ts" "$@"; }
+
+          de record --title "make build fails" --cmd "make build" \
+            --symptom "error: missing separator" --anchor package.json >/dev/null
+
+          de check --cmd "make build" -q; blocked=$?
+          test "$blocked" -eq 3 || { echo "expected 3 (blocked), got $blocked"; exit 1; }
+
+          printf '{"name":"gate","changed":true}\n' > package.json
+          de check --cmd "make build" -q; suspect=$?
+          test "$suspect" -eq 4 || { echo "expected 4 (suspect), got $suspect"; exit 1; }
+
+          de verify dd_ --now-works >/dev/null
+          de check --cmd "make build" -q; clear=$?
+          test "$clear" -eq 0 || { echo "expected 0 (clear), got $clear"; exit 1; }
+
+          echo "gate behaves: blocked=$blocked suspect=$suspect clear=$clear"

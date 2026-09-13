@@ -1,0 +1,62 @@
+{
+  "name": "dsh-deadend",
+  "version": "1.0.0",
+  "description": "A refutation ledger for coding agents: remember what did not work, and expire it automatically when the code it depended on changes.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "deadend": "./src/cli.ts"
+  },
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "engines": {
+    "node": ">=23.6"
+  },
+  "scripts": {
+    "test": "node --test",
+    "typecheck": "tsc --noEmit",
+    "check": "node --test && tsc --noEmit",
+    "deadend": "node src/cli.ts"
+  },
+  "files": [
+    "src",
+    "skills",
+    "cordis.patch.yml",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh-plugin",
+    "ai-agents",
+    "agent-skills",
+    "coding-agents",
+    "negative-knowledge",
+    "dead-ends",
+    "agent-memory",
+    "context-engineering",
+    "refutation",
+    "invalidation",
+    "developer-tools",
+    "cli"
+  ],
+  "homepage": "https://github.com/liyixuan201211/dsh-deadend",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liyixuan201211/dsh-deadend.git"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "compatibility": {
+      "dsh": ">=0.1.5-rc.1 <0.2.0"
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}
