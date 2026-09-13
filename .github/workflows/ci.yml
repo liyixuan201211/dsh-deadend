@@ -48,7 +48,9 @@ jobs:
 
       - name: The exit codes are the contract
         run: |
-          set -u
+          # The runner's shell is `bash -e`, and every interesting command here
+          # exits non-zero by design, so errexit has to go.
+          set +e
           work="$(mktemp -d)"
           cd "$work"
           printf '{"name":"gate"}\n' > package.json
@@ -56,16 +58,22 @@ jobs:
 
           de record --title "make build fails" --cmd "make build" \
             --symptom "error: missing separator" --anchor package.json >/dev/null
+          recorded=$?
 
           de check --cmd "make build" -q; blocked=$?
-          test "$blocked" -eq 3 || { echo "expected 3 (blocked), got $blocked"; exit 1; }
 
           printf '{"name":"gate","changed":true}\n' > package.json
           de check --cmd "make build" -q; suspect=$?
-          test "$suspect" -eq 4 || { echo "expected 4 (suspect), got $suspect"; exit 1; }
 
           de verify dd_ --now-works >/dev/null
           de check --cmd "make build" -q; clear=$?
-          test "$clear" -eq 0 || { echo "expected 0 (clear), got $clear"; exit 1; }
 
-          echo "gate behaves: blocked=$blocked suspect=$suspect clear=$clear"
+          printf 'recorded=%s blocked=%s suspect=%s clear=%s\n' \
+            "$recorded" "$blocked" "$suspect" "$clear"
+
+          [ "$recorded" -eq 0 ] || { echo "record should succeed, got $recorded"; exit 1; }
+          [ "$blocked" -eq 3 ] || { echo "expected 3 (blocked), got $blocked"; exit 1; }
+          [ "$suspect" -eq 4 ] || { echo "expected 4 (suspect), got $suspect"; exit 1; }
+          [ "$clear" -eq 0 ] || { echo "expected 0 (clear), got $clear"; exit 1; }
+
+          echo "gate behaves."
