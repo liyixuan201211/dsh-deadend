@@ -4,32 +4,29 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const CLI = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
-
-export interface Sandbox {
-  dir: string;
-  path(rel: string): string;
-  write(rel: string, body: string): void;
-  rm(rel: string): void;
-  cleanup(): void;
-}
+export const CLI = fileURLToPath(new URL("../src/cli.js", import.meta.url));
 
 /**
  * A throwaway directory standing in for a user's repository.
  *
  * No git: `findRoot` falls back to the starting directory, which is exactly the
  * behaviour we want under test, and it keeps the suite fast.
+ *
+ * @param {Record<string, string>} [files]
  */
-export function sandbox(files: Record<string, string> = {}): Sandbox {
+export function sandbox(files = {}) {
   const dir = mkdtempSync(join(tmpdir(), "deadend-test-"));
-  const box: Sandbox = {
+  const box = {
     dir,
+    /** @param {string} rel */
     path: (rel) => join(dir, rel),
+    /** @param {string} rel @param {string} body */
     write: (rel, body) => {
       const abs = join(dir, rel);
       mkdirSync(dirname(abs), { recursive: true });
       writeFileSync(abs, body, "utf8");
     },
+    /** @param {string} rel */
     rm: (rel) => rmSync(join(dir, rel), { recursive: true, force: true }),
     cleanup: () => rmSync(dir, { recursive: true, force: true }),
   };
@@ -37,13 +34,12 @@ export function sandbox(files: Record<string, string> = {}): Sandbox {
   return box;
 }
 
-export interface CliResult {
-  code: number;
-  stdout: string;
-  stderr: string;
-}
-
-export function runCli(dir: string, args: string[], stdin?: string): CliResult {
+/**
+ * @param {string} dir
+ * @param {string[]} args
+ * @param {string} [stdin]
+ */
+export function runCli(dir, args, stdin) {
   const result = spawnSync(process.execPath, [CLI, ...args], {
     cwd: dir,
     encoding: "utf8",

@@ -15,22 +15,28 @@
  * numbers, absolute paths, temp directories, hashes, UUIDs, timestamps,
  * durations, byte counts, addresses.
  */
-import { collapse, sha256, truncate } from "./util.ts";
+import { collapse, sha256, truncate } from "./util.js";
 
-// eslint-disable-next-line no-control-regex
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 
 /** Lines that look like the actual failure, rather than progress chatter. */
 const ERROR_HINT =
   /(error|err!|fail|failed|failure|exception|traceback|panic|fatal|cannot|can't|unable to|not found|no such file|undefined|is not|refused|denied|timed? ?out|unmet|conflict|unresolved|unsupported|missing|invalid|abort|✗|✘|×)/i;
 
-export const stripAnsi = (s: string): string => s.replace(ANSI, "");
+/**
+ * @param {string} s
+ * @returns {string}
+ */
+export const stripAnsi = (s) => s.replace(ANSI, "");
 
 /**
  * Replace any token containing a path separator with its final segment, while
  * preserving the punctuation around it (`'a/b/c.ts',` -> `'c.ts',`).
+ *
+ * @param {string} s
+ * @returns {string}
  */
-function collapsePaths(s: string): string {
+function collapsePaths(s) {
   return s.replace(/\S*[/\\]\S*/g, (token) => {
     const lead = token.match(/^[^\w./\\-]*/)?.[0] ?? "";
     const tail = token.match(/[^\w./\\-]*$/)?.[0] ?? "";
@@ -44,8 +50,12 @@ function collapsePaths(s: string): string {
  * Normalise one line. `lower` controls case folding: the hash uses the folded
  * form (stable across message-case changes) while the stored excerpt keeps the
  * original case so it stays readable.
+ *
+ * @param {string} line
+ * @param {{ lower: boolean }} options
+ * @returns {string}
  */
-export function normalizeLine(line: string, options: { lower: boolean }): string {
+export function normalizeLine(line, options) {
   let s = stripAnsi(line);
   s = collapsePaths(s);
 
@@ -76,14 +86,12 @@ export function normalizeLine(line: string, options: { lower: boolean }): string
   return options.lower ? s.toLowerCase() : s;
 }
 
-export interface SymptomSignature {
-  /** `sha256:<hex>` over the folded signature lines. */
-  fingerprint: string;
-  /** Short, human-readable form for reports. */
-  excerpt: string;
-  /** The normalised lines the hash was computed from. */
-  keys: string[];
-}
+/**
+ * @typedef {object} SymptomSignature
+ * @property {string} fingerprint `sha256:<hex>` over the folded signature lines.
+ * @property {string} excerpt Short, human-readable form for reports.
+ * @property {string[]} keys The normalised lines the hash was computed from.
+ */
 
 /**
  * Compute the signature of a chunk of failure output.
@@ -91,8 +99,12 @@ export interface SymptomSignature {
  * When the output contains no line that looks like an error we fall back to the
  * tail of the output — most tools print the reason last — so that a signature is
  * still produced rather than nothing.
+ *
+ * @param {string} raw
+ * @param {number} [maxLines]
+ * @returns {SymptomSignature}
  */
-export function signature(raw: string, maxLines = 5): SymptomSignature {
+export function signature(raw, maxLines = 5) {
   const lines = stripAnsi(raw)
     .split(/\r?\n/)
     .map((l) => l.trim())
@@ -101,9 +113,12 @@ export function signature(raw: string, maxLines = 5): SymptomSignature {
   const hinted = lines.filter((l) => ERROR_HINT.test(l));
   const chosen = hinted.length > 0 ? hinted : lines.slice(-maxLines);
 
-  const seen = new Set<string>();
-  const keys: string[] = [];
-  const display: string[] = [];
+  /** @type {Set<string>} */
+  const seen = new Set();
+  /** @type {string[]} */
+  const keys = [];
+  /** @type {string[]} */
+  const display = [];
 
   for (const line of chosen) {
     const key = normalizeLine(line, { lower: true });

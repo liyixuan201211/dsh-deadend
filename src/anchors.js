@@ -21,8 +21,7 @@ import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { Anchor, AnchorCheck, DeadEnd } from "./model.ts";
-import { isDir, isFile, sha256, toPosix } from "./util.ts";
+import { isDir, isFile, sha256, toPosix } from "./util.js";
 
 /** Directories that are never interesting and ruinously expensive to hash. */
 const SKIP_DIRS = new Set([
@@ -36,13 +35,23 @@ const MAX_WALK_DEPTH = 12;
 const MAX_MANIFEST_FILES = 5000;
 
 /**
+ * @typedef {import("./model.js").Anchor} Anchor
+ * @typedef {import("./model.js").AnchorCheck} AnchorCheck
+ * @typedef {import("./model.js").DeadEnd} DeadEnd
+ */
+
+/**
  * List files under `rel` using git when possible.
  *
  * git is both faster and more correct than a hand-rolled walk: it already knows
  * about .gitignore, so we never hash a build directory the user has excluded.
  * Returns null when git cannot answer, and the caller falls back to a walk.
+ *
+ * @param {string} root
+ * @param {string} rel
+ * @returns {string[] | null}
  */
-function gitListFiles(root: string, rel: string): string[] | null {
+function gitListFiles(root, rel) {
   const result = spawnSync("git", ["ls-files", "-z", "--", rel], {
     cwd: root,
     encoding: "utf8",
@@ -56,7 +65,14 @@ function gitListFiles(root: string, rel: string): string[] | null {
   return files.filter((f) => f === prefix || f.startsWith(`${prefix}/`));
 }
 
-function walkFiles(root: string, rel: string, out: string[], depth: number): void {
+/**
+ * @param {string} root
+ * @param {string} rel
+ * @param {string[]} out
+ * @param {number} depth
+ * @returns {void}
+ */
+function walkFiles(root, rel, out, depth) {
   if (depth > MAX_WALK_DEPTH || out.length > MAX_MANIFEST_FILES) return;
   const abs = join(root, rel);
   if (isFile(abs)) {
@@ -74,8 +90,12 @@ function walkFiles(root: string, rel: string, out: string[], depth: number): voi
  * Hash a path into an anchor. Returns null when the path does not exist — you
  * cannot anchor to nothing, and letting it slide would create a record that
  * silently never decays.
+ *
+ * @param {string} root
+ * @param {string} rel
+ * @returns {Anchor | null}
  */
-export function hashPath(root: string, rel: string): Anchor | null {
+export function hashPath(root, rel) {
   const clean = toPosix(rel).replace(/^\.\//, "").replace(/\/+$/, "");
   const abs = join(root, clean);
 
@@ -85,11 +105,15 @@ export function hashPath(root: string, rel: string): Anchor | null {
 
   if (isDir(abs)) {
     const listed = gitListFiles(root, clean) ?? [];
-    const files = (listed.length > 0 ? listed : (() => {
-      const walked: string[] = [];
+    let candidates = listed;
+    if (candidates.length === 0) {
+      /** @type {string[]} */
+      const walked = [];
       walkFiles(root, clean, walked, 0);
-      return walked;
-    })())
+      candidates = walked;
+    }
+
+    const files = candidates
       .filter((f) => isFile(join(root, f)))
       .sort()
       .slice(0, MAX_MANIFEST_FILES);
@@ -104,8 +128,14 @@ export function hashPath(root: string, rel: string): Anchor | null {
   return null;
 }
 
-/** Recompute one anchor against the current tree. */
-export function checkAnchor(root: string, anchor: Anchor): AnchorCheck {
+/**
+ * Recompute one anchor against the current tree.
+ *
+ * @param {string} root
+ * @param {Anchor} anchor
+ * @returns {AnchorCheck}
+ */
+export function checkAnchor(root, anchor) {
   const now = hashPath(root, anchor.path);
   if (!now) return { path: anchor.path, state: "missing", was: anchor.hash, now: null };
   if (now.hash === anchor.hash) {
@@ -114,11 +144,23 @@ export function checkAnchor(root: string, anchor: Anchor): AnchorCheck {
   return { path: anchor.path, state: "changed", was: anchor.hash, now: now.hash };
 }
 
-export const evaluateAnchors = (root: string, entry: DeadEnd): AnchorCheck[] =>
+/**
+ * @param {string} root
+ * @param {DeadEnd} entry
+ * @returns {AnchorCheck[]}
+ */
+export const evaluateAnchors = (root, entry) =>
   entry.anchors.map((a) => checkAnchor(root, a));
 
-/** True when the recorded world no longer matches the current one. */
-export function hasDecayed(root: string, entry: DeadEnd, checks?: AnchorCheck[]): boolean {
+/**
+ * True when the recorded world no longer matches the current one.
+ *
+ * @param {string} root
+ * @param {DeadEnd} entry
+ * @param {AnchorCheck[]} [checks]
+ * @returns {boolean}
+ */
+export function hasDecayed(root, entry, checks) {
   if (entry.decay === "none") return false;
   const result = checks ?? evaluateAnchors(root, entry);
   return result.some((c) => c.state !== "unchanged");
@@ -131,8 +173,10 @@ export function hasDecayed(root: string, entry: DeadEnd, checks?: AnchorCheck[])
  * be falsifiable" is only reasonable if the tool does the work of finding the
  * falsifier, so `record` suggests the lockfiles and manifests that the failed
  * command almost certainly read.
+ *
+ * @type {Array<[RegExp, string[]]>}
  */
-const ANCHOR_RECIPES: Array<[RegExp, string[]]> = [
+const ANCHOR_RECIPES = [
   [/\b(npm|npx|yarn|pnpm|bun|node)\b/, ["package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb"]],
   [/\b(tsc|vitest|jest|vite|eslint|prettier|webpack|rollup|esbuild)\b/, ["package.json", "tsconfig.json"]],
   [/\b(python3?|pip3?|pytest|uv|poetry|ruff|mypy|tox)\b/, ["pyproject.toml", "requirements.txt", "uv.lock", "poetry.lock", "setup.py"]],
@@ -148,9 +192,16 @@ const ANCHOR_RECIPES: Array<[RegExp, string[]]> = [
   [/\b(flutter|dart)\b/, ["pubspec.yaml", "pubspec.lock"]],
 ];
 
-export function suggestAnchors(root: string, command: string | null): string[] {
-  const out: string[] = [];
-  const consider = (p: string): void => {
+/**
+ * @param {string} root
+ * @param {string | null} command
+ * @returns {string[]}
+ */
+export function suggestAnchors(root, command) {
+  /** @type {string[]} */
+  const out = [];
+  /** @param {string} p */
+  const consider = (p) => {
     if (out.includes(p)) return;
     if (isFile(join(root, p)) || isDir(join(root, p))) out.push(p);
   };

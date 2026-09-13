@@ -6,53 +6,81 @@
  * legible, and making the escape hatch (re-test) obvious. A verdict without its
  * evidence just teaches an agent to route around the tool.
  */
-import type {
-  CheckResult,
-  EntryView,
-  GcResult,
-  Match,
-  RecordResult,
-  StatusSummary,
-  VerifyResult,
-} from "./engine.ts";
-import type { AnchorCheck } from "./model.ts";
-import { ageInDays, plural } from "./util.ts";
+import { ageInDays, plural } from "./util.js";
 
-export const shortDigest = (hash: string | null): string =>
+/**
+ * @typedef {import("./engine.js").CheckResult} CheckResult
+ * @typedef {import("./engine.js").EntryView} EntryView
+ * @typedef {import("./engine.js").GcResult} GcResult
+ * @typedef {import("./engine.js").Match} Match
+ * @typedef {import("./engine.js").RecordResult} RecordResult
+ * @typedef {import("./engine.js").StatusSummary} StatusSummary
+ * @typedef {import("./engine.js").VerifyResult} VerifyResult
+ * @typedef {import("./model.js").AnchorCheck} AnchorCheck
+ */
+
+/**
+ * @param {string | null} hash
+ * @returns {string}
+ */
+export const shortDigest = (hash) =>
   hash === null ? "missing" : hash.replace(/^sha256:/, "").slice(0, 8);
 
-const ago = (iso: string): string => {
+/**
+ * @param {string} iso
+ * @returns {string}
+ */
+const ago = (iso) => {
   const days = ageInDays(iso);
   if (days === null) return iso;
   if (days <= 0) return "today";
   return `${days} ${days === 1 ? "day" : "days"} ago`;
 };
 
-const rule = (): string => "─".repeat(72);
+/** @returns {string} */
+const rule = () => "─".repeat(72);
 
-function anchorLine(check: AnchorCheck): string {
+/**
+ * @param {AnchorCheck} check
+ * @returns {string}
+ */
+function anchorLine(check) {
   if (check.state === "unchanged") return `      ✓ ${check.path}`;
   if (check.state === "missing") return `      ✗ ${check.path}  (deleted since recording)`;
   return `      ✗ ${check.path}  ${shortDigest(check.was)} → ${shortDigest(check.now)}`;
 }
 
-function anchorSummary(check: AnchorCheck[]): string {
+/**
+ * @param {AnchorCheck[]} check
+ * @returns {string}
+ */
+function anchorSummary(check) {
   const changed = check.filter((c) => c.state !== "unchanged").length;
   if (check.length === 0) return "no anchors — this can never expire";
   if (changed === 0) return `${check.length} of ${check.length} unchanged — still authoritative`;
   return `${changed} of ${check.length} changed — no longer authoritative`;
 }
 
-function fullDate(iso: string): string {
+/**
+ * @param {string} iso
+ * @returns {string}
+ */
+function fullDate(iso) {
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return iso;
   return new Date(t).toISOString().slice(0, 10);
 }
 
-/** One dead end, in full, with the anchors that decide its fate. */
-export function renderMatch(match: Match): string[] {
+/**
+ * One dead end, in full, with the anchors that decide its fate.
+ *
+ * @param {Match} match
+ * @returns {string[]}
+ */
+export function renderMatch(match) {
   const e = match.entry;
-  const lines: string[] = [];
+  /** @type {string[]} */
+  const lines = [];
 
   lines.push(`${e.id}  ${e.title}`);
   lines.push(`    matched   ${match.reasons.join("; ")}`);
@@ -75,8 +103,13 @@ export function renderMatch(match: Match): string[] {
   return lines;
 }
 
-export function renderCheck(result: CheckResult): string {
-  const out: string[] = [];
+/**
+ * @param {CheckResult} result
+ * @returns {string}
+ */
+export function renderCheck(result) {
+  /** @type {string[]} */
+  const out = [];
   const blocking = result.matches.filter((m) => !m.decayed);
   const suspects = result.matches.filter((m) => m.decayed);
 
@@ -147,20 +180,24 @@ export function renderCheck(result: CheckResult): string {
 
 /* ------------------------------------------------------------------ */
 
-export function renderList(rows: EntryView[], all: EntryView[] = rows): string {
+/**
+ * @param {EntryView[]} rows
+ * @param {EntryView[]} [all]
+ * @returns {string}
+ */
+export function renderList(rows, all = rows) {
   if (all.length === 0) {
     return "No dead ends recorded yet. Run `deadend record` after a failure worth not repeating.\n";
   }
 
-  const out: string[] = [];
+  /** @type {string[]} */
+  const out = [];
   const counts = {
     active: all.filter((v) => v.effectiveStatus === "active").length,
     suspect: all.filter((v) => v.effectiveStatus === "suspect").length,
     retired: all.filter((v) => v.effectiveStatus === "retired").length,
   };
-  out.push(
-    `${counts.active} active · ${counts.suspect} suspect · ${counts.retired} retired`,
-  );
+  out.push(`${counts.active} active · ${counts.suspect} suspect · ${counts.retired} retired`);
   if (rows.length !== all.length) {
     out.push(`showing ${rows.length} of ${all.length}`);
   }
@@ -177,7 +214,10 @@ export function renderList(rows: EntryView[], all: EntryView[] = rows): string {
   for (const view of rows) {
     const why =
       view.effectiveStatus === "suspect"
-        ? `(${view.checks.filter((c) => c.state !== "unchanged").map((c) => c.path).join(", ")} changed)`
+        ? `(${view.checks
+            .filter((c) => c.state !== "unchanged")
+            .map((c) => c.path)
+            .join(", ")} changed)`
         : view.entry.decay === "none"
           ? "(no anchors — can never expire)"
           : `(${plural(view.checks.length, "anchor")} ok)`;
@@ -195,8 +235,13 @@ export function renderList(rows: EntryView[], all: EntryView[] = rows): string {
   return `${out.join("\n")}\n`;
 }
 
-export function renderShow(view: EntryView): string {
-  const out: string[] = [];
+/**
+ * @param {EntryView} view
+ * @returns {string}
+ */
+export function renderShow(view) {
+  /** @type {string[]} */
+  const out = [];
   const { entry } = view;
 
   out.push(`${entry.id}  ${entry.title}`);
@@ -215,7 +260,9 @@ export function renderShow(view: EntryView): string {
   if (entry.retry) out.push(`    instead   ${entry.retry}`);
   if (entry.evidence.length > 0) out.push(`    evidence  ${entry.evidence.join(", ")}`);
   if (entry.tags.length > 0) out.push(`    tags      ${entry.tags.join(", ")}`);
-  if (entry.retiredAt) out.push(`    retired   ${fullDate(entry.retiredAt)} — ${entry.retireReason ?? ""}`);
+  if (entry.retiredAt) {
+    out.push(`    retired   ${fullDate(entry.retiredAt)} — ${entry.retireReason ?? ""}`);
+  }
 
   out.push(`    anchors   ${anchorSummary(view.checks)}`);
   for (const check of view.checks) out.push(anchorLine(check));
@@ -237,8 +284,13 @@ export function renderShow(view: EntryView): string {
 
 /* ------------------------------------------------------------------ */
 
-export function renderStatus(summary: StatusSummary): string {
-  const out: string[] = [];
+/**
+ * @param {StatusSummary} summary
+ * @returns {string}
+ */
+export function renderStatus(summary) {
+  /** @type {string[]} */
+  const out = [];
   out.push(`repo       ${summary.root}`);
   out.push(`ledger     ${summary.ledger}`);
   out.push(`entries    ${summary.total}`);
@@ -273,9 +325,15 @@ export function renderStatus(summary: StatusSummary): string {
 
 /* ------------------------------------------------------------------ */
 
-export function renderRecord(result: RecordResult, ledgerRelative: string): string {
+/**
+ * @param {RecordResult} result
+ * @param {string} ledgerRelative
+ * @returns {string}
+ */
+export function renderRecord(result, ledgerRelative) {
   if (result.ok) {
-    const out: string[] = [];
+    /** @type {string[]} */
+    const out = [];
     out.push(
       `${result.recurrence ? "Re-recorded" : "Recorded"} ${result.entry.id} — ${result.entry.title}`,
     );
@@ -304,7 +362,8 @@ export function renderRecord(result: RecordResult, ledgerRelative: string): stri
   }
 
   if (result.reason === "no-anchors") {
-    const out: string[] = [];
+    /** @type {string[]} */
+    const out = [];
     out.push("Refusing to record: no anchors.");
     out.push("");
     out.push("A dead end with nothing to watch can never expire, and a claim that can");
@@ -334,7 +393,11 @@ export function renderRecord(result: RecordResult, ledgerRelative: string): stri
   return "A dead end needs a title (`--title`).\n";
 }
 
-export function renderVerify(result: VerifyResult): string {
+/**
+ * @param {VerifyResult} result
+ * @returns {string}
+ */
+export function renderVerify(result) {
   if (!result.ok) return `No dead end matches "${result.id}".\n`;
   if (result.outcome === "now-works") {
     return [
@@ -356,20 +419,23 @@ export function renderVerify(result: VerifyResult): string {
   ].join("\n");
 }
 
-export function renderGc(result: GcResult): string {
+/**
+ * @param {GcResult} result
+ * @returns {string}
+ */
+export function renderGc(result) {
   const saved = result.bytesBefore - result.bytesAfter;
-  return [
+  /** @type {string[]} */
+  const lines = [
     `${result.dryRun ? "Would compact" : "Compacted"} the ledger:`,
     `  entries  ${result.entriesBefore} → ${result.entriesAfter} (dropped ${result.dropped})`,
     `  bytes    ${result.bytesBefore} → ${result.bytesAfter}${
       result.dryRun || saved <= 0 ? "" : ` (saved ${saved})`
     }`,
-    result.undecayable > 0
-      ? `\n⚠ ${plural(result.undecayable, "kept entry", "kept entries")} cannot expire (no anchors).`
-      : "",
-    "",
-  ]
-    .filter((l) => l !== "")
-    .join("\n")
-    .concat("\n");
+  ];
+  if (result.undecayable > 0) {
+    lines.push("");
+    lines.push(`⚠ ${plural(result.undecayable, "kept entry", "kept entries")} cannot expire (no anchors).`);
+  }
+  return `${lines.join("\n")}\n`;
 }

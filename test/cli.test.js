@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { runCli, sandbox } from "./helpers.ts";
+import { runCli, sandbox } from "./helpers.js";
 
 const FILES = { "package.json": '{"name":"demo"}', "package-lock.json": "{}" };
 
@@ -57,7 +57,7 @@ test("check --json emits parseable JSON", (t) => {
   t.after(() => box.cleanup());
   const result = runCli(box.dir, ["check", "--cmd", "npm test", "--json"]);
   assert.equal(result.code, 0);
-  const parsed = JSON.parse(result.stdout) as { verdict: string };
+  const parsed = JSON.parse(result.stdout);
   assert.equal(parsed.verdict, "clear");
 });
 
@@ -160,7 +160,7 @@ test("list, status and show all work on a populated ledger", (t) => {
   assert.match(list.stdout, /make build/);
 
   const json = runCli(box.dir, ["list", "--json"]);
-  const parsed = JSON.parse(json.stdout) as Array<{ title: string; status: string }>;
+  const parsed = JSON.parse(json.stdout);
   assert.equal(parsed[0]?.status, "active");
 
   const status = runCli(box.dir, ["status"]);

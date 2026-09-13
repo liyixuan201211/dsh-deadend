@@ -5,10 +5,80 @@
  * The ledger is an event log rather than a mutable document for three reasons:
  * it never needs a read-modify-write cycle (so two agents cannot clobber each
  * other), it diffs cleanly in git, and every status change keeps its reason.
+ *
+ * @typedef {"active" | "suspect" | "retired"} Status
+ *
+ * @typedef {"anchored" | "none"} DecayKind
+ *
+ * @typedef {object} Anchor
+ * @property {string} path Repo-relative, posix-separated.
+ * @property {string} hash `sha256:<hex>` of the file, or of a sorted manifest for a directory.
+ * @property {"file" | "dir"} kind
+ *
+ * @typedef {object} AnchorCheck
+ * @property {string} path
+ * @property {"unchanged" | "changed" | "missing"} state
+ * @property {string} was The hash recorded when the dead end was written (or last re-confirmed).
+ * @property {string | null} now The hash now; null when the path no longer exists.
+ *
+ * @typedef {object} HistoryEntry
+ * @property {string} at
+ * @property {string} event
+ * @property {string | null} note
+ *
+ * @typedef {object} DeadEnd
+ * @property {string} id
+ * @property {string} title
+ * @property {string} createdAt
+ * @property {string} updatedAt
+ * @property {string | null} command
+ * @property {string | null} normalized
+ * @property {string | null} family
+ * @property {number | null} exitCode
+ * @property {string | null} fingerprint
+ * @property {string | null} excerpt
+ * @property {string | null} why
+ * @property {string | null} retry
+ * @property {string[]} evidence
+ * @property {string[]} tags
+ * @property {Anchor[]} anchors
+ * @property {DecayKind} decay
+ * @property {Status} status
+ * @property {string | null} retiredAt
+ * @property {string | null} retireReason
+ * @property {string[]} notes
+ * @property {HistoryEntry[]} history
+ *
+ * @typedef {"still-fails" | "now-works"} VerifyOutcome
+ *
+ * @typedef {object} RecordEvent
+ * @property {1} v
+ * @property {"record"} event
+ * @property {string} at
+ * @property {DeadEnd} entry
+ *
+ * @typedef {object} VerifyEvent
+ * @property {1} v
+ * @property {"verify"} event
+ * @property {string} at
+ * @property {string} id
+ * @property {VerifyOutcome} outcome
+ * @property {Anchor[] | null} anchors
+ * @property {string | null} note
+ *
+ * @typedef {object} NoteEvent
+ * @property {1} v
+ * @property {"note"} event
+ * @property {string} at
+ * @property {string} id
+ * @property {string} text
+ *
+ * @typedef {RecordEvent | VerifyEvent | NoteEvent} LedgerEvent
+ *
+ * @typedef {object} ReplayResult
+ * @property {DeadEnd[]} entries
+ * @property {string[]} errors
  */
-
-/** `suspect` is derived at read time from anchors; it is never stored. */
-export type Status = "active" | "suspect" | "retired";
 
 /**
  * How a dead end can stop being true.
@@ -19,108 +89,38 @@ export type Status = "active" | "suspect" | "retired";
  *              rejects this"). Undecayable entries never stop blocking, which
  *              is why `record` refuses to create one by accident.
  */
-export type DecayKind = "anchored" | "none";
-
-export interface Anchor {
-  /** Repo-relative, posix-separated. */
-  path: string;
-  /** `sha256:<hex>` of the file, or of a sorted manifest for a directory. */
-  hash: string;
-  kind: "file" | "dir";
-}
-
-/** The result of re-hashing one anchor against the current tree. */
-export interface AnchorCheck {
-  path: string;
-  state: "unchanged" | "changed" | "missing";
-  /** The hash recorded when the dead end was written (or last re-confirmed). */
-  was: string;
-  /** The hash now; null when the path no longer exists. */
-  now: string | null;
-}
-
-export interface HistoryEntry {
-  at: string;
-  event: string;
-  note: string | null;
-}
-
-export interface DeadEnd {
-  id: string;
-  title: string;
-  createdAt: string;
-  updatedAt: string;
-
-  /** The attempt that failed. */
-  command: string | null;
-  normalized: string | null;
-  family: string | null;
-  exitCode: number | null;
-
-  /** The failure itself, as a stable signature. */
-  fingerprint: string | null;
-  excerpt: string | null;
-
-  why: string | null;
-  retry: string | null;
-  evidence: string[];
-  tags: string[];
-
-  anchors: Anchor[];
-  decay: DecayKind;
-
-  status: Status;
-  retiredAt: string | null;
-  retireReason: string | null;
-
-  notes: string[];
-  history: HistoryEntry[];
-}
-
-export type VerifyOutcome = "still-fails" | "now-works";
-
-export type LedgerEvent =
-  | { v: 1; event: "record"; at: string; entry: DeadEnd }
-  | {
-      v: 1;
-      event: "verify";
-      at: string;
-      id: string;
-      outcome: VerifyOutcome;
-      anchors: Anchor[] | null;
-      note: string | null;
-    }
-  | { v: 1; event: "note"; at: string; id: string; text: string };
-
-export interface ReplayResult {
-  entries: DeadEnd[];
-  errors: string[];
-}
 
 /**
  * Rebuild current state from ledger lines.
  *
  * Unparseable lines are reported, never silently dropped: a corrupted ledger
  * that quietly forgets dead ends is worse than one that says so.
+ *
+ * @param {string[]} lines
+ * @returns {ReplayResult}
  */
-export function replay(lines: string[]): ReplayResult {
-  const map = new Map<string, DeadEnd>();
-  const order: string[] = [];
-  const errors: string[] = [];
+export function replay(lines) {
+  /** @type {Map<string, DeadEnd>} */
+  const map = new Map();
+  /** @type {string[]} */
+  const order = [];
+  /** @type {string[]} */
+  const errors = [];
 
   lines.forEach((line, index) => {
     const trimmed = line.trim();
     if (!trimmed) return;
 
-    let ev: LedgerEvent;
+    /** @type {LedgerEvent} */
+    let ev;
     try {
-      ev = JSON.parse(trimmed) as LedgerEvent;
+      ev = JSON.parse(trimmed);
     } catch {
       errors.push(`line ${index + 1}: not valid JSON`);
       return;
     }
 
-    if (ev === null || typeof ev !== "object" || (ev as { v?: unknown }).v !== 1) {
+    if (ev === null || typeof ev !== "object" || ev.v !== 1) {
       errors.push(`line ${index + 1}: not a v1 ledger event`);
       return;
     }
@@ -173,9 +173,7 @@ export function replay(lines: string[]): ReplayResult {
     errors.push(`line ${index + 1}: unknown event type`);
   });
 
-  const entries = order
-    .map((id) => map.get(id))
-    .filter((e): e is DeadEnd => e !== undefined);
+  const entries = order.map((id) => map.get(id)).filter((e) => e !== undefined);
 
   return { entries, errors };
 }
@@ -185,8 +183,12 @@ export function replay(lines: string[]): ReplayResult {
  *
  * `decay: "none"` entries never decay — that is the hazard the tool exists to
  * make visible, not a feature to hide.
+ *
+ * @param {DeadEnd} entry
+ * @param {AnchorCheck[]} checks
+ * @returns {boolean}
  */
-export function isDecayed(entry: DeadEnd, checks: AnchorCheck[]): boolean {
+export function isDecayed(entry, checks) {
   if (entry.decay === "none") return false;
   return checks.some((c) => c.state !== "unchanged");
 }

@@ -16,17 +16,9 @@ import { readFileSync } from "node:fs";
 import { relative } from "node:path";
 import { parseArgs } from "node:util";
 
-import {
-  check,
-  gc,
-  record,
-  summarize,
-  viewAll,
-  verify,
-  type EntryView,
-} from "./engine.ts";
-import { signature } from "./fingerprint.ts";
-import { findRoot, init, ledgerPath } from "./ledger.ts";
+import { check, gc, record, summarize, viewAll, verify } from "./engine.js";
+import { signature } from "./fingerprint.js";
+import { findRoot, init, ledgerPath } from "./ledger.js";
 import {
   renderCheck,
   renderGc,
@@ -35,8 +27,8 @@ import {
   renderShow,
   renderStatus,
   renderVerify,
-} from "./report.ts";
-import { toPosix } from "./util.ts";
+} from "./report.js";
+import { toPosix } from "./util.js";
 
 export const VERSION = "1.0.0";
 
@@ -47,8 +39,26 @@ const EXIT = {
   blocked: 3,
   suspect: 4,
   refused: 5,
-} as const;
+};
 
+/**
+ * The option surface this file reads. Declared as a record type rather than a
+ * list of `@property` tags because several CLI flags contain dashes, which
+ * `@property` cannot express.
+ *
+ * @typedef {{
+ *   help?: boolean, version?: boolean, json?: boolean, quiet?: boolean,
+ *   title?: string, cmd?: string, exit?: string, log?: string,
+ *   symptom?: string, why?: string, retry?: string,
+ *   anchor?: string[], evidence?: string[], tag?: string[],
+ *   unanchored?: boolean, force?: boolean,
+ *   "still-fails"?: boolean, "now-works"?: boolean, note?: string,
+ *   status?: string, all?: boolean,
+ *   "drop-retired"?: boolean, "drop-undecayable"?: boolean, "dry-run"?: boolean,
+ * }} CliValues
+ */
+
+/** @type {import("node:util").ParseArgsOptionsConfig} */
 const OPTIONS = {
   help: { type: "boolean", short: "h" },
   version: { type: "boolean" },
@@ -78,7 +88,7 @@ const OPTIONS = {
   "drop-retired": { type: "boolean" },
   "drop-undecayable": { type: "boolean" },
   "dry-run": { type: "boolean" },
-} as const;
+};
 
 const HELP = `deadend — remember what did not work, so it costs you once.
 
@@ -124,7 +134,8 @@ shared and committed. Entries expire when an anchor's content changes — not
 when a clock says so.
 `;
 
-function readStdin(): string {
+/** @returns {string} */
+function readStdin() {
   try {
     return readFileSync(0, "utf8");
   } catch {
@@ -132,11 +143,13 @@ function readStdin(): string {
   }
 }
 
-/** Resolve the failure text a command was given, from any of the three sources. */
-function resolveLogText(values: {
-  log?: string | undefined;
-  symptom?: string | undefined;
-}): string | null {
+/**
+ * Resolve the failure text a command was given, from any of the three sources.
+ *
+ * @param {{ log?: string, symptom?: string }} values
+ * @returns {string | null}
+ */
+function resolveLogText(values) {
   if (values.symptom !== undefined) return values.symptom;
   if (values.log === undefined) return null;
   if (values.log === "-") return readStdin();
@@ -147,11 +160,19 @@ function resolveLogText(values: {
   }
 }
 
-const ledgerDisplay = (root: string): string => toPosix(relative(root, ledgerPath(root)));
+/**
+ * @param {string} root
+ * @returns {string}
+ */
+const ledgerDisplay = (root) => toPosix(relative(root, ledgerPath(root)));
 
 class UsageError extends Error {}
 
-function main(argv: string[]): number {
+/**
+ * @param {string[]} argv
+ * @returns {number}
+ */
+function main(argv) {
   const command = argv[0];
   const rest = argv.slice(1);
 
@@ -170,7 +191,13 @@ function main(argv: string[]): number {
     allowPositionals: true,
     strict: true,
   });
-  const { values, positionals } = parsed;
+
+  // parseArgs can only describe its values as a union of every option type.
+  // The shape below is the contract this file actually reads; the cast is
+  // routed through `unknown` because it is a narrowing of an opaque record,
+  // not a claim that the two types are related.
+  const values = /** @type {CliValues} */ (/** @type {unknown} */ (parsed.values));
+  const positionals = parsed.positionals;
 
   if (values.version) {
     process.stdout.write(`deadend ${VERSION}\n`);
@@ -250,7 +277,7 @@ function main(argv: string[]): number {
 
     case "list": {
       const { views, errors } = viewAll(root);
-      let filtered: EntryView[] = views;
+      let filtered = views;
       if (values.status !== undefined) {
         const wanted = values.status;
         filtered = views.filter((v) => v.effectiveStatus === wanted);
@@ -295,7 +322,7 @@ function main(argv: string[]): number {
         return EXIT.error;
       }
       if (json) {
-        process.stdout.write(`${JSON.stringify({ ...view, effectiveStatus: view.effectiveStatus }, null, 2)}\n`);
+        process.stdout.write(`${JSON.stringify(view, null, 2)}\n`);
         return EXIT.ok;
       }
       process.stdout.write(renderShow(view));
@@ -316,7 +343,8 @@ function main(argv: string[]): number {
       let note = values.note ?? null;
       if (stillFails && logText) {
         const sig = signature(logText);
-        note = note === null ? `signature ${sig.fingerprint.slice(7, 19)}` : `${note} (signature ${sig.fingerprint.slice(7, 19)})`;
+        const short = sig.fingerprint.slice(7, 19);
+        note = note === null ? `signature ${short}` : `${note} (signature ${short})`;
       }
 
       const result = verify(root, id, stillFails ? "still-fails" : "now-works", note);
@@ -365,17 +393,14 @@ function main(argv: string[]): number {
 try {
   process.exitCode = main(process.argv.slice(2));
 } catch (error) {
-  if (error instanceof UsageError) {
-    process.stderr.write(`${error.message}\n`);
-    process.exitCode = EXIT.usage;
-  } else if (error instanceof Error && "code" in error && error.code === "ERR_PARSE_ARGS_UNKNOWN_OPTION") {
-    process.stderr.write(`${error.message}\n`);
-    process.exitCode = EXIT.usage;
-  } else if (error instanceof Error && "code" in error && String(error.code).startsWith("ERR_PARSE_ARGS")) {
-    process.stderr.write(`${error.message}\n`);
+  const code = error instanceof Error && "code" in error ? String(error.code) : "";
+  if (error instanceof UsageError || code.startsWith("ERR_PARSE_ARGS")) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = EXIT.usage;
   } else {
-    process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+    process.stderr.write(
+      `${error instanceof Error ? error.stack ?? error.message : String(error)}\n`,
+    );
     process.exitCode = EXIT.error;
   }
 }

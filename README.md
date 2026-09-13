@@ -262,25 +262,28 @@ boot graph; review `cordis.patch.yml`, `package.json` (no lifecycle scripts) and
 
 ## Development
 
-Requires Node >= 23.6 — the sources are TypeScript, executed directly via Node's
-type stripping. There is no build step.
+Requires Node >= 20. The sources are plain ESM JavaScript with JSDoc types, so
+there is no build step and no install-time script — and the published `bin`
+actually runs when installed. (They cannot be TypeScript: Node refuses to strip
+types for files inside `node_modules`, which is precisely where the package lands
+when it is installed or run through `npx`. The `installable` CI job guards that.)
 
 ```bash
-npm test        # 58 tests
-npm run typecheck
-npm run check   # both
+npm test            # 58 tests
+npm run typecheck   # tsc --noEmit over the JSDoc types
+npm run check       # both
 ```
 
 ```
 src/
-  cli.ts          exit-code contract and argument parsing
-  engine.ts       record / check / verify / gc, and the verdict rules
-  anchors.ts      hashing paths, detecting decay, suggesting anchors
-  fingerprint.ts  normalising failure output into a stable signature
-  model.ts        data model and event-log replay
-  ledger.ts       locating and reading/writing .deadend/ledger.jsonl
-  report.ts       human-readable rendering
-  index.ts        programmatic API
+  cli.js          exit-code contract and argument parsing
+  engine.js       record / check / verify / gc, and the verdict rules
+  anchors.js      hashing paths, detecting decay, suggesting anchors
+  fingerprint.js  normalising failure output into a stable signature
+  model.js        data model and event-log replay
+  ledger.js       locating and reading/writing .deadend/ledger.jsonl
+  report.js       human-readable rendering
+  index.js        programmatic API
 ```
 
 ## License

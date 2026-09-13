@@ -10,7 +10,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CLI=(node "$HERE/../src/cli.ts")
+CLI=(node "$HERE/../src/cli.js")
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 

@@ -7,11 +7,11 @@
     "types": ["node"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
-    "allowImportingTsExtensions": true,
+    "allowJs": true,
+    "checkJs": true,
     "noEmit": true,
-    "verbatimModuleSyntax": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": ["src/**/*.js", "test/**/*.js"]
 }

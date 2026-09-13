@@ -12,50 +12,49 @@
  */
 import { statSync } from "node:fs";
 
-import {
-  evaluateAnchors,
-  hashPath,
-  hasDecayed,
-  suggestAnchors,
-} from "./anchors.ts";
-import { signature } from "./fingerprint.ts";
-import { append, load, ledgerPath, writeAll } from "./ledger.ts";
-import type {
-  Anchor,
-  AnchorCheck,
-  DeadEnd,
-  LedgerEvent,
-  Status,
-  VerifyOutcome,
-} from "./model.ts";
-import {
-  commandFamily,
-  jaccard,
-  normalizeCommand,
-  nowIso,
-  sha256,
-  tokenize,
-} from "./util.ts";
+import { evaluateAnchors, hashPath, hasDecayed, suggestAnchors } from "./anchors.js";
+import { signature } from "./fingerprint.js";
+import { append, load, ledgerPath, writeAll } from "./ledger.js";
+import { commandFamily, jaccard, normalizeCommand, nowIso, sha256, tokenize } from "./util.js";
+
+/**
+ * @typedef {import("./model.js").Anchor} Anchor
+ * @typedef {import("./model.js").AnchorCheck} AnchorCheck
+ * @typedef {import("./model.js").DeadEnd} DeadEnd
+ * @typedef {import("./model.js").LedgerEvent} LedgerEvent
+ * @typedef {import("./model.js").Status} Status
+ * @typedef {import("./model.js").VerifyOutcome} VerifyOutcome
+ */
 
 /* ------------------------------------------------------------------ *
  * Views
  * ------------------------------------------------------------------ */
 
-/** A dead end plus its freshly-evaluated decay state. */
-export interface EntryView {
-  entry: DeadEnd;
-  checks: AnchorCheck[];
-  decayed: boolean;
-  /** `suspect` is computed here; the stored status is only ever active/retired. */
-  effectiveStatus: Status;
-}
+/**
+ * A dead end plus its freshly-evaluated decay state.
+ *
+ * @typedef {object} EntryView
+ * @property {DeadEnd} entry
+ * @property {AnchorCheck[]} checks
+ * @property {boolean} decayed
+ * @property {Status} effectiveStatus `suspect` is computed here; the stored status is only ever active/retired.
+ */
 
-export function effectiveStatus(entry: DeadEnd, decayed: boolean): Status {
+/**
+ * @param {DeadEnd} entry
+ * @param {boolean} decayed
+ * @returns {Status}
+ */
+export function effectiveStatus(entry, decayed) {
   if (entry.status === "retired") return "retired";
   return decayed ? "suspect" : "active";
 }
 
-export function viewAll(root: string): { views: EntryView[]; errors: string[] } {
+/**
+ * @param {string} root
+ * @returns {{ views: EntryView[], errors: string[] }}
+ */
+export function viewAll(root) {
   const { entries, errors } = load(root);
   const views = entries.map((entry) => {
     const checks = evaluateAnchors(root, entry);
@@ -69,42 +68,29 @@ export function viewAll(root: string): { views: EntryView[]; errors: string[] } 
  * check
  * ------------------------------------------------------------------ */
 
-export interface CheckQuery {
-  command?: string | undefined;
-  fingerprint?: string | undefined;
-  title?: string | undefined;
-}
-
-export interface Match {
-  entry: DeadEnd;
-  /** 3 = same failure signature, 2 = same command, 1 = same family / similar. */
-  strength: number;
-  reasons: string[];
-  checks: AnchorCheck[];
-  decayed: boolean;
-  /**
-   * Whether this match may change the verdict.
-   *
-   * Only strength >= 2 is decisive. A shared command *family* — "you once had
-   * trouble with `npm install`" — is a hint worth showing and not worth
-   * blocking on: `npm install sharp` failing says nothing about
-   * `npm install left-pad`. Blocking there would be false confidence, and false
-   * confidence is how a gate like this gets switched off.
-   */
-  blocking: boolean;
-}
-
-export type Verdict = "clear" | "blocked" | "suspect";
-
-export interface CheckResult {
-  verdict: Verdict;
-  /** Decisive matches (strength >= 2). These are what the verdict is made of. */
-  matches: Match[];
-  /** Weak hints (strength 1). Reported, but they never change the verdict. */
-  related: Match[];
-  query: { command: string | null; fingerprint: string | null; title: string | null };
-  errors: string[];
-}
+/**
+ * @typedef {object} CheckQuery
+ * @property {string} [command]
+ * @property {string} [fingerprint]
+ * @property {string} [title]
+ *
+ * @typedef {object} Match
+ * @property {DeadEnd} entry
+ * @property {number} strength 3 = same failure signature, 2 = same command, 1 = same family / similar.
+ * @property {string[]} reasons
+ * @property {AnchorCheck[]} checks
+ * @property {boolean} decayed
+ * @property {boolean} blocking Whether this match may change the verdict.
+ *
+ * @typedef {"clear" | "blocked" | "suspect"} Verdict
+ *
+ * @typedef {object} CheckResult
+ * @property {Verdict} verdict
+ * @property {Match[]} matches Decisive matches (strength >= 2). These are what the verdict is made of.
+ * @property {Match[]} related Weak hints (strength 1). Reported, but they never change the verdict.
+ * @property {{ command: string | null, fingerprint: string | null, title: string | null }} query
+ * @property {string[]} errors
+ */
 
 /**
  * Match a proposed attempt against the ledger.
@@ -114,21 +100,33 @@ export interface CheckResult {
  * looked like); an identical normalised command is next; a shared command
  * family or a similar title is a weak hint worth surfacing but not worth
  * blocking on.
+ *
+ * Only strength >= 2 is decisive. A shared command *family* — "you once had
+ * trouble with `npm install`" — is a hint worth showing and not worth blocking
+ * on: `npm install sharp` failing says nothing about `npm install left-pad`.
+ * Blocking there would be false confidence, and false confidence is how a gate
+ * like this gets switched off.
+ *
+ * @param {string} root
+ * @param {CheckQuery} query
+ * @returns {CheckResult}
  */
-export function check(root: string, query: CheckQuery): CheckResult {
+export function check(root, query) {
   const { entries, errors } = load(root);
 
   const normalized = query.command ? normalizeCommand(query.command) : null;
   const family = query.command ? commandFamily(query.command) : null;
   const titleTokens = query.title ? tokenize(query.title) : [];
 
-  const matches: Match[] = [];
+  /** @type {Match[]} */
+  const matches = [];
 
   for (const entry of entries) {
     if (entry.status === "retired") continue;
 
     let strength = 0;
-    const reasons: string[] = [];
+    /** @type {string[]} */
+    const reasons = [];
 
     if (query.fingerprint && entry.fingerprint && entry.fingerprint === query.fingerprint) {
       strength = Math.max(strength, 3);
@@ -175,7 +173,8 @@ export function check(root: string, query: CheckQuery): CheckResult {
 
   // A single still-authoritative dead end is enough to block. Suspects never
   // block — they are a prompt to re-test, not a prohibition.
-  const verdict: Verdict = decisive.some((m) => !m.decayed)
+  /** @type {Verdict} */
+  const verdict = decisive.some((m) => !m.decayed)
     ? "blocked"
     : decisive.some((m) => m.decayed)
       ? "suspect"
@@ -198,39 +197,38 @@ export function check(root: string, query: CheckQuery): CheckResult {
  * record
  * ------------------------------------------------------------------ */
 
-export interface RecordInput {
-  title: string;
-  command?: string | null;
-  exitCode?: number | null;
-  logText?: string | null;
-  why?: string | null;
-  retry?: string | null;
-  evidence?: string[];
-  tags?: string[];
-  anchors?: string[];
-  unanchored?: boolean;
-  force?: boolean;
-}
-
-export type RecordResult =
-  | { ok: true; entry: DeadEnd; recurrence: boolean }
-  | { ok: false; reason: "empty-title" }
-  | { ok: false; reason: "no-anchors"; suggestions: string[] }
-  | { ok: false; reason: "missing-anchors"; missing: string[] }
-  | { ok: false; reason: "duplicate"; existing: DeadEnd };
+/**
+ * @typedef {object} RecordInput
+ * @property {string} title
+ * @property {string | null} [command]
+ * @property {number | null} [exitCode]
+ * @property {string | null} [logText]
+ * @property {string | null} [why]
+ * @property {string | null} [retry]
+ * @property {string[]} [evidence]
+ * @property {string[]} [tags]
+ * @property {string[]} [anchors]
+ * @property {boolean} [unanchored]
+ * @property {boolean} [force]
+ *
+ * @typedef {{ ok: true, entry: DeadEnd, recurrence: boolean }} RecordOk
+ * @typedef {{ ok: false, reason: "empty-title" }} RecordEmptyTitle
+ * @typedef {{ ok: false, reason: "no-anchors", suggestions: string[] }} RecordNoAnchors
+ * @typedef {{ ok: false, reason: "missing-anchors", missing: string[] }} RecordMissingAnchors
+ * @typedef {{ ok: false, reason: "duplicate", existing: DeadEnd }} RecordDuplicate
+ * @typedef {RecordOk | RecordEmptyTitle | RecordNoAnchors | RecordMissingAnchors | RecordDuplicate} RecordResult
+ */
 
 /**
  * Identity is derived from the content of the claim, not from a counter or a
  * random id. Two teammates who record the same dead end independently produce
  * the same id, so merging ledgers is a union rather than a de-duplication
  * problem.
+ *
+ * @param {{ title: string, normalized: string | null, fingerprint: string | null, anchorPaths: string[] }} input
+ * @returns {string}
  */
-function identify(input: {
-  title: string;
-  normalized: string | null;
-  fingerprint: string | null;
-  anchorPaths: string[];
-}): string {
+function identify(input) {
   const key = [
     input.title.trim().toLowerCase(),
     input.normalized ?? "",
@@ -240,21 +238,32 @@ function identify(input: {
   return `dd_${sha256(key).slice(0, 12)}`;
 }
 
-export function record(root: string, input: RecordInput): RecordResult {
+/**
+ * @param {string} root
+ * @param {RecordInput} input
+ * @returns {RecordResult}
+ */
+export function record(root, input) {
   const title = input.title.trim();
   if (!title) return { ok: false, reason: "empty-title" };
 
   const requested = (input.anchors ?? []).map((p) => p.trim()).filter(Boolean);
 
   // The discipline that makes the tool worth having: a dead end with nothing to
-  // watch can never expire, and an expired-proof block is indistinguishable
+  // watch can never expire, and an expiry-proof block is indistinguishable
   // from a bug. So we refuse to create one silently.
   if (!input.unanchored && requested.length === 0) {
-    return { ok: false, reason: "no-anchors", suggestions: suggestAnchors(root, input.command ?? null) };
+    return {
+      ok: false,
+      reason: "no-anchors",
+      suggestions: suggestAnchors(root, input.command ?? null),
+    };
   }
 
-  const anchors: Anchor[] = [];
-  const missing: string[] = [];
+  /** @type {Anchor[]} */
+  const anchors = [];
+  /** @type {string[]} */
+  const missing = [];
   for (const path of requested) {
     const anchor = hashPath(root, path);
     if (anchor) anchors.push(anchor);
@@ -280,7 +289,8 @@ export function record(root: string, input: RecordInput): RecordResult {
     return { ok: false, reason: "duplicate", existing };
   }
 
-  const entry: DeadEnd = {
+  /** @type {DeadEnd} */
+  const entry = {
     id,
     title,
     createdAt: at,
@@ -320,9 +330,11 @@ export function record(root: string, input: RecordInput): RecordResult {
  * verify
  * ------------------------------------------------------------------ */
 
-export type VerifyResult =
-  | { ok: true; entry: DeadEnd; outcome: VerifyOutcome; anchors: Anchor[] }
-  | { ok: false; reason: "not-found"; id: string };
+/**
+ * @typedef {{ ok: true, entry: DeadEnd, outcome: VerifyOutcome, anchors: Anchor[] }} VerifyOk
+ * @typedef {{ ok: false, reason: "not-found", id: string }} VerifyNotFound
+ * @typedef {VerifyOk | VerifyNotFound} VerifyResult
+ */
 
 /**
  * Re-test outcome, applied to the ledger.
@@ -330,13 +342,14 @@ export type VerifyResult =
  * `still-fails` re-pins the anchors to the current tree, which is what makes a
  * suspect authoritative again: the claim has been re-observed against the
  * world as it is now.
+ *
+ * @param {string} root
+ * @param {string} id
+ * @param {VerifyOutcome} outcome
+ * @param {string | null} note
+ * @returns {VerifyResult}
  */
-export function verify(
-  root: string,
-  id: string,
-  outcome: VerifyOutcome,
-  note: string | null,
-): VerifyResult {
+export function verify(root, id, outcome, note) {
   const { entries } = load(root);
   const entry = entries.find((e) => e.id === id || e.id.startsWith(id));
   if (!entry) return { ok: false, reason: "not-found", id };
@@ -344,9 +357,7 @@ export function verify(
   const at = nowIso();
   const anchors =
     outcome === "still-fails"
-      ? entry.anchors
-          .map((a) => hashPath(root, a.path))
-          .filter((a): a is Anchor => a !== null)
+      ? entry.anchors.map((a) => hashPath(root, a.path)).filter((a) => a !== null)
       : [];
 
   append(root, { v: 1, event: "verify", at, id: entry.id, outcome, anchors, note });
@@ -359,20 +370,32 @@ export function verify(
  * gc
  * ------------------------------------------------------------------ */
 
-export interface GcOptions {
-  dropRetired?: boolean;
-  dropUndecayable?: boolean;
-}
+/**
+ * @typedef {object} GcOptions
+ * @property {boolean} [dropRetired]
+ * @property {boolean} [dropUndecayable]
+ *
+ * @typedef {object} GcResult
+ * @property {true} ok
+ * @property {number} entriesBefore
+ * @property {number} entriesAfter
+ * @property {number} dropped
+ * @property {number} bytesBefore
+ * @property {number} bytesAfter
+ * @property {boolean} dryRun
+ * @property {number} undecayable
+ */
 
-export interface GcResult {
-  ok: true;
-  entriesBefore: number;
-  entriesAfter: number;
-  dropped: number;
-  bytesBefore: number;
-  bytesAfter: number;
-  dryRun: boolean;
-  undecayable: number;
+/**
+ * @param {string} path
+ * @returns {number}
+ */
+function readBytes(path) {
+  try {
+    return statSync(path).size;
+  } catch {
+    return 0;
+  }
 }
 
 /**
@@ -381,8 +404,13 @@ export interface GcResult {
  * Replay already accumulates history into the entry, so a compacted ledger
  * keeps every observation while shedding the intermediate events that produced
  * them.
+ *
+ * @param {string} root
+ * @param {GcOptions} [options]
+ * @param {boolean} [dryRun]
+ * @returns {GcResult}
  */
-export function gc(root: string, options: GcOptions = {}, dryRun = false): GcResult {
+export function gc(root, options = {}, dryRun = false) {
   const { views } = viewAll(root);
   const path = ledgerPath(root);
   const before = views.length;
@@ -393,9 +421,10 @@ export function gc(root: string, options: GcOptions = {}, dryRun = false): GcRes
     return true;
   });
 
-  const events: LedgerEvent[] = keep.map((v) => ({
-    v: 1 as const,
-    event: "record" as const,
+  /** @type {LedgerEvent[]} */
+  const events = keep.map((v) => ({
+    v: 1,
+    event: "record",
     at: v.entry.createdAt,
     entry: v.entry,
   }));
@@ -417,34 +446,32 @@ export function gc(root: string, options: GcOptions = {}, dryRun = false): GcRes
   };
 }
 
-function readBytes(path: string): number {
-  try {
-    return statSync(path).size;
-  } catch {
-    return 0;
-  }
-}
-
 /* ------------------------------------------------------------------ *
  * status
  * ------------------------------------------------------------------ */
 
-export interface StatusSummary {
-  root: string;
-  ledger: string;
-  total: number;
-  active: number;
-  suspect: number;
-  retired: number;
-  undecayable: number;
-  oldest: string | null;
-  newest: string | null;
-  errors: string[];
-}
+/**
+ * @typedef {object} StatusSummary
+ * @property {string} root
+ * @property {string} ledger
+ * @property {number} total
+ * @property {number} active
+ * @property {number} suspect
+ * @property {number} retired
+ * @property {number} undecayable
+ * @property {string | null} oldest
+ * @property {string | null} newest
+ * @property {string[]} errors
+ */
 
-export function summarize(root: string): StatusSummary {
+/**
+ * @param {string} root
+ * @returns {StatusSummary}
+ */
+export function summarize(root) {
   const { views, errors } = viewAll(root);
-  const at = (v: EntryView): string => v.entry.updatedAt || v.entry.createdAt;
+  /** @param {EntryView} v @returns {string} */
+  const at = (v) => v.entry.updatedAt || v.entry.createdAt;
   const times = views.map(at).sort();
 
   return {

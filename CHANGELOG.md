@@ -38,7 +38,10 @@ described is gone.
 
 ### Notes
 
-- Requires Node >= 23.6 (runs the TypeScript sources directly via type
-  stripping; no build step).
+- Requires Node >= 20. The sources are plain ESM JavaScript with JSDoc types:
+  no build step, and no install-time scripts. They cannot be TypeScript,
+  because Node refuses to strip types for files inside `node_modules` — which is
+  exactly where the package lands when it is installed or run through `npx`.
+  `npm run typecheck` still checks the whole tree with `tsc --noEmit` (`checkJs`).
 - The cordis patch is intentionally empty: this plugin adds nothing to the boot
   graph.

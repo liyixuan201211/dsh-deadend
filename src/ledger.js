@@ -16,15 +16,29 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
-import type { DeadEnd, LedgerEvent } from "./model.ts";
-import { replay } from "./model.ts";
-import { isDir } from "./util.ts";
+import { replay } from "./model.js";
+import { isDir } from "./util.js";
+
+/**
+ * @typedef {import("./model.js").DeadEnd} DeadEnd
+ * @typedef {import("./model.js").LedgerEvent} LedgerEvent
+ * @typedef {import("./model.js").ReplayResult} ReplayResult
+ */
 
 export const LEDGER_DIR = ".deadend";
 export const LEDGER_FILE = "ledger.jsonl";
 
-export const ledgerDir = (root: string): string => join(root, LEDGER_DIR);
-export const ledgerPath = (root: string): string => join(root, LEDGER_DIR, LEDGER_FILE);
+/**
+ * @param {string} root
+ * @returns {string}
+ */
+export const ledgerDir = (root) => join(root, LEDGER_DIR);
+
+/**
+ * @param {string} root
+ * @returns {string}
+ */
+export const ledgerPath = (root) => join(root, LEDGER_DIR, LEDGER_FILE);
 
 /**
  * Find the repository root.
@@ -32,11 +46,15 @@ export const ledgerPath = (root: string): string => join(root, LEDGER_DIR, LEDGE
  * An existing ledger wins outright (so a nested ledger inside a monorepo
  * package keeps working), otherwise we use the git root, otherwise the current
  * directory.
+ *
+ * @param {string} [start]
+ * @returns {string}
  */
-export function findRoot(start: string = process.cwd()): string {
+export function findRoot(start = process.cwd()) {
   const from = resolve(start);
   let dir = from;
-  let gitRoot: string | null = null;
+  /** @type {string | null} */
+  let gitRoot = null;
 
   for (;;) {
     if (isDir(join(dir, LEDGER_DIR))) return dir;
@@ -48,42 +66,67 @@ export function findRoot(start: string = process.cwd()): string {
   }
 }
 
-export function readLedgerLines(root: string): string[] {
+/**
+ * @param {string} root
+ * @returns {string[]}
+ */
+export function readLedgerLines(root) {
   const path = ledgerPath(root);
   if (!existsSync(path)) return [];
   return readFileSync(path, "utf8").split("\n");
 }
 
-export interface LedgerState {
-  entries: DeadEnd[];
-  errors: string[];
-}
+/**
+ * @param {string} root
+ * @returns {ReplayResult}
+ */
+export const load = (root) => replay(readLedgerLines(root));
 
-export const load = (root: string): LedgerState => replay(readLedgerLines(root));
-
-export const findEntry = (root: string, id: string): DeadEnd | undefined =>
+/**
+ * @param {string} root
+ * @param {string} id
+ * @returns {DeadEnd | undefined}
+ */
+export const findEntry = (root, id) =>
   load(root).entries.find((e) => e.id === id || e.id.startsWith(id));
 
-export function append(root: string, event: LedgerEvent): void {
+/**
+ * @param {string} root
+ * @param {LedgerEvent} event
+ * @returns {void}
+ */
+export function append(root, event) {
   mkdirSync(ledgerDir(root), { recursive: true });
   appendFileSync(ledgerPath(root), `${JSON.stringify(event)}\n`, "utf8");
 }
 
-/** Rewrite the whole ledger, used only by `gc` compaction. */
-export function writeAll(root: string, events: LedgerEvent[]): void {
+/**
+ * Rewrite the whole ledger, used only by `gc` compaction.
+ *
+ * @param {string} root
+ * @param {LedgerEvent[]} events
+ * @returns {void}
+ */
+export function writeAll(root, events) {
   mkdirSync(ledgerDir(root), { recursive: true });
   const body = events.map((e) => JSON.stringify(e)).join("\n");
   writeFileSync(ledgerPath(root), body.length > 0 ? `${body}\n` : "", "utf8");
 }
 
-export interface InitResult {
-  root: string;
-  created: boolean;
-  path: string;
-}
+/**
+ * @typedef {object} InitResult
+ * @property {string} root
+ * @property {boolean} created
+ * @property {string} path
+ */
 
-/** Create the ledger directory and, when in a git repo, ignore local scratch. */
-export function init(root: string): InitResult {
+/**
+ * Create the ledger directory.
+ *
+ * @param {string} root
+ * @returns {InitResult}
+ */
+export function init(root) {
   const dir = ledgerDir(root);
   const created = !isDir(dir);
   mkdirSync(dir, { recursive: true });

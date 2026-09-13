@@ -7,8 +7,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { normalizeLine, signature, stripAnsi } from "../src/fingerprint.ts";
-import { SHARP_LOG, SHARP_LOG_OTHER_MACHINE } from "./helpers.ts";
+import { normalizeLine, signature, stripAnsi } from "../src/fingerprint.js";
+import { SHARP_LOG, SHARP_LOG_OTHER_MACHINE } from "./helpers.js";
 
 test("the same failure on two machines has the same fingerprint", () => {
   assert.equal(
@@ -27,7 +27,8 @@ test("different failures have different fingerprints", () => {
 });
 
 test("line and column numbers are not part of the identity", () => {
-  const at = (line: string): string => signature(`Error: boom\n    at fn (app.ts:${line})`).fingerprint;
+  /** @param {string} line */
+  const at = (line) => signature(`Error: boom\n    at fn (app.ts:${line})`).fingerprint;
   assert.equal(at("10:5"), at("999:42"));
 });
 

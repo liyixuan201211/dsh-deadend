@@ -11,11 +11,14 @@ import {
   hashPath,
   hasDecayed,
   suggestAnchors,
-} from "../src/anchors.ts";
-import type { DeadEnd } from "../src/model.ts";
-import { sandbox } from "./helpers.ts";
+} from "../src/anchors.js";
+import { sandbox } from "./helpers.js";
 
-const entryWith = (anchors: DeadEnd["anchors"]): DeadEnd => ({
+/**
+ * @param {import("../src/model.js").Anchor[]} anchors
+ * @returns {import("../src/model.js").DeadEnd}
+ */
+const entryWith = (anchors) => ({
   id: "dd_test",
   title: "t",
   createdAt: "2026-01-01T00:00:00.000Z",

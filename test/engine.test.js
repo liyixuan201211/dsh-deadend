@@ -5,13 +5,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { check, gc, record, summarize, verify, viewAll } from "../src/engine.ts";
-import type { RecordResult } from "../src/engine.ts";
-import { signature } from "../src/fingerprint.ts";
-import { init } from "../src/ledger.ts";
-import { SHARP_LOG, SHARP_LOG_OTHER_MACHINE, sandbox } from "./helpers.ts";
+import { check, gc, record, summarize, verify, viewAll } from "../src/engine.js";
+import { signature } from "../src/fingerprint.js";
+import { init } from "../src/ledger.js";
+import { SHARP_LOG, SHARP_LOG_OTHER_MACHINE, sandbox } from "./helpers.js";
 
-function mustRecord(result: RecordResult): Extract<RecordResult, { ok: true }> {
+/**
+ * @param {import("../src/engine.js").RecordResult} result
+ * @returns {import("../src/engine.js").RecordOk}
+ */
+function mustRecord(result) {
   if (!result.ok) assert.fail(`expected record to succeed, got refusal: ${result.reason}`);
   return result;
 }

@@ -13,10 +13,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 23.6 is the floor: it is the first release where Node executes
-        # TypeScript directly (type stripping), which this package relies on to
-        # avoid a build step.
-        node: ['23', '24']
+        # The floor is Node 20, which is where the built-in test runner and
+        # stable ESM support land. Nothing here needs a newer runtime: the
+        # sources are plain JavaScript, so there is no build step.
+        node: ['20', '22', '24']
     steps:
       - uses: actions/checkout@v4
 
@@ -33,6 +33,38 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+  installable:
+    name: the published bin actually runs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Regression guard. An earlier revision pointed `bin` at a .ts file, which
+      # works when run from a checkout and fails the moment the package lands in
+      # node_modules, because Node refuses to type-strip there. Installing the
+      # packed tarball is the only test that reproduces that.
+      - name: Install the tarball into a real node_modules
+        run: |
+          npm pack --pack-destination "$RUNNER_TEMP" >/dev/null
+          mkdir -p "$RUNNER_TEMP/consumer"
+          cd "$RUNNER_TEMP/consumer"
+          npm init -y >/dev/null
+          npm install "$RUNNER_TEMP"/dsh-deadend-*.tgz --no-audit --no-fund >/dev/null
+
+      - name: The bin resolves inside node_modules and runs
+        run: |
+          cd "$RUNNER_TEMP/consumer"
+          resolved="$(realpath node_modules/dsh-deadend/src/cli.js)"
+          case "$resolved" in
+            */node_modules/dsh-deadend/*) echo "resolved: $resolved" ;;
+            *) echo "expected a real copy inside node_modules, got $resolved"; exit 1 ;;
+          esac
+          ./node_modules/.bin/deadend --version
+
   demo:
     name: demo (dogfoods the gate)
     runs-on: ubuntu-latest
@@ -41,7 +73,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '20'
 
       - name: Run the end-to-end demo
         run: ./examples/demo.sh
@@ -54,7 +86,7 @@ jobs:
           work="$(mktemp -d)"
           cd "$work"
           printf '{"name":"gate"}\n' > package.json
-          de() { node "$GITHUB_WORKSPACE/src/cli.ts" "$@"; }
+          de() { node "$GITHUB_WORKSPACE/src/cli.js" "$@"; }
 
           de record --title "make build fails" --cmd "make build" \
             --symptom "error: missing separator" --anchor package.json >/dev/null
