@@ -88,7 +88,7 @@ export function normalizeLine(line, options) {
 
 /**
  * @typedef {object} SymptomSignature
- * @property {string} fingerprint `sha256:<hex>` over the folded signature lines.
+ * @property {string | null} fingerprint `sha256:<hex>` over the folded signature lines, or null when there was nothing worth hashing.
  * @property {string} excerpt Short, human-readable form for reports.
  * @property {string[]} keys The normalised lines the hash was computed from.
  */
@@ -129,9 +129,14 @@ export function signature(raw, maxLines = 5) {
     if (keys.length >= maxLines) break;
   }
 
-  const joined = keys.join("\n");
+  // No signature lines means no signature. Hashing the empty string would give
+  // every such log the *same* fingerprint, and `check` would then report an
+  // "identical failure signature" between two entirely unrelated failures —
+  // a false block, which is the one thing this tool must never do.
+  const fingerprint = keys.length > 0 ? `sha256:${sha256(keys.join("\n"))}` : null;
+
   return {
-    fingerprint: `sha256:${sha256(joined)}`,
+    fingerprint,
     excerpt: truncate(display.slice(0, 3).join(" | "), 240),
     keys,
   };

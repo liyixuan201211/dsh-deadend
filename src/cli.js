@@ -16,13 +16,14 @@ import { readFileSync } from "node:fs";
 import { relative } from "node:path";
 import { parseArgs } from "node:util";
 
-import { check, gc, record, summarize, viewAll, verify } from "./engine.js";
+import { check, gc, merge, record, summarize, viewAll, verify } from "./engine.js";
 import { signature } from "./fingerprint.js";
 import { findRoot, init, ledgerPath } from "./ledger.js";
 import {
   renderCheck,
   renderGc,
   renderList,
+  renderMerge,
   renderRecord,
   renderShow,
   renderStatus,
@@ -30,7 +31,7 @@ import {
 } from "./report.js";
 import { toPosix } from "./util.js";
 
-export const VERSION = "1.0.0";
+export const VERSION = "1.1.0";
 
 const EXIT = {
   ok: 0,
@@ -123,9 +124,11 @@ Usage: deadend <command> [options]
 
   list      List recorded dead ends.        --status active|suspect|retired
   show      Full detail for one entry.      deadend show <id>
-  status    Ledger summary, including entries that can never expire.
+  status    Ledger summary, and the entries that need attention.
   init      Create .deadend/ in this repo.
   gc        Compact the event log.          --dry-run --drop-retired
+  merge     Union other ledgers into this one, then compact.
+              deadend merge <ledger.jsonl...>   (use - for stdin)
 
 Global: --json (machine-readable), -h/--help, --version
 
@@ -146,6 +149,11 @@ function readStdin() {
 /**
  * Resolve the failure text a command was given, from any of the three sources.
  *
+ * An unreadable `--log` is an error, never a silent null. Quietly dropping the
+ * log would downgrade `check` from signature matching to command matching, and
+ * a typo in a path would turn a BLOCKED into a CLEAR. A safety check must not
+ * fail open.
+ *
  * @param {{ log?: string, symptom?: string }} values
  * @returns {string | null}
  */
@@ -156,7 +164,7 @@ function resolveLogText(values) {
   try {
     return readFileSync(values.log, "utf8");
   } catch {
-    return null;
+    throw new UsageError(`cannot read --log file: ${values.log}`);
   }
 }
 
@@ -227,12 +235,23 @@ function main(argv) {
       if (!title.trim()) throw new UsageError("record needs a title: --title <text>");
 
       const logText = resolveLogText(values);
-      const exitCode = values.exit === undefined ? null : Number.parseInt(values.exit, 10);
+
+      // A non-integer here used to fall through to `null`, silently discarding
+      // what the user typed. Reject it instead of recording a vaguer entry than
+      // the one they asked for.
+      let exitCode = null;
+      if (values.exit !== undefined) {
+        const parsed = Number(values.exit.trim() === "" ? Number.NaN : values.exit);
+        if (!Number.isInteger(parsed)) {
+          throw new UsageError(`--exit must be an integer, got "${values.exit}"`);
+        }
+        exitCode = parsed;
+      }
 
       const result = record(root, {
         title,
         command: values.cmd ?? null,
-        exitCode: exitCode !== null && Number.isFinite(exitCode) ? exitCode : null,
+        exitCode,
         logText,
         why: values.why ?? null,
         retry: values.retry ?? null,
@@ -260,7 +279,7 @@ function main(argv) {
 
       const result = check(root, {
         command: commandQuery || undefined,
-        fingerprint: logText ? signature(logText).fingerprint : undefined,
+        fingerprint: logText ? (signature(logText).fingerprint ?? undefined) : undefined,
         title: values.title ?? undefined,
       });
 
@@ -342,9 +361,13 @@ function main(argv) {
       const logText = resolveLogText(values);
       let note = values.note ?? null;
       if (stillFails && logText) {
-        const sig = signature(logText);
-        const short = sig.fingerprint.slice(7, 19);
-        note = note === null ? `signature ${short}` : `${note} (signature ${short})`;
+        const { fingerprint } = signature(logText);
+        // An empty or uninformative log yields no signature, so there is
+        // nothing to name.
+        if (fingerprint !== null) {
+          const short = fingerprint.slice(7, 19);
+          note = note === null ? `signature ${short}` : `${note} (signature ${short})`;
+        }
       }
 
       const result = verify(root, id, stillFails ? "still-fails" : "now-works", note);
@@ -381,6 +404,30 @@ function main(argv) {
         return EXIT.ok;
       }
       process.stdout.write(renderGc(result));
+      return EXIT.ok;
+    }
+
+    case "merge": {
+      if (positionals.length === 0) {
+        throw new UsageError("merge needs at least one ledger file: deadend merge <file...>");
+      }
+
+      /** @type {string[]} */
+      const texts = positionals.map((p) => {
+        if (p === "-") return readStdin();
+        try {
+          return readFileSync(p, "utf8");
+        } catch {
+          throw new UsageError(`cannot read ledger: ${p}`);
+        }
+      });
+
+      const result = merge(root, texts);
+      if (json) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return EXIT.ok;
+      }
+      process.stdout.write(renderMerge(result, ledgerDisplay(root)));
       return EXIT.ok;
     }
 

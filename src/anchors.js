@@ -104,9 +104,15 @@ export function hashPath(root, rel) {
   }
 
   if (isDir(abs)) {
-    const listed = gitListFiles(root, clean) ?? [];
-    let candidates = listed;
-    if (candidates.length === 0) {
+    // `null` means git could not answer, so fall back to a walk. An *empty
+    // array* is an answer: nothing tracked lives here. Walking anyway would
+    // pull in gitignored build output and make the anchor thrash.
+    const listed = gitListFiles(root, clean);
+    /** @type {string[]} */
+    let candidates;
+    if (listed !== null) {
+      candidates = listed;
+    } else {
       /** @type {string[]} */
       const walked = [];
       walkFiles(root, clean, walked, 0);
@@ -122,7 +128,15 @@ export function hashPath(root, rel) {
       .map((f) => `${f} ${sha256(readFileSync(join(root, f)))}`)
       .join("\n");
 
-    return { path: clean, hash: `sha256:${sha256(manifest)}`, kind: "dir" };
+    // `files` travels with the anchor so `record` can refuse a directory that
+    // covers nothing: its manifest can never change, so it would be an
+    // undecayable entry wearing the costume of a properly anchored one.
+    return {
+      path: clean,
+      hash: `sha256:${sha256(manifest)}`,
+      kind: "dir",
+      files: files.length,
+    };
   }
 
   return null;

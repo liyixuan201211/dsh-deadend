@@ -52,6 +52,7 @@ export {
   check,
   effectiveStatus,
   gc,
+  merge,
   record,
   summarize,
   verify,
@@ -84,7 +85,7 @@ export function lookBeforeYouLeap(root, attempt) {
   const result = check(root, {
     command: attempt.command,
     title: attempt.title,
-    fingerprint: attempt.logText ? signature(attempt.logText).fingerprint : undefined,
+    fingerprint: attempt.logText ? (signature(attempt.logText).fingerprint ?? undefined) : undefined,
   });
 
   /** @type {string} */

@@ -140,13 +140,34 @@ is how the ledger stays true.
 de list                 # active + suspect, newest first
 de list --status retired --all
 de show dd_50e127c7d9c5 # one entry in full, including its history
-de status               # counts, plus anything that can never expire
+de status               # counts, plus the entries that need attention
 de gc --drop-retired    # compact the event log
+de merge other.jsonl    # union another clone's ledger into this one
 ```
 
-`de status` warns about entries with no anchors and about suspects that keep
-being ignored. A ledger full of undecayable entries is a ledger that will lie to
-you, so treat that warning as work to do.
+`de status` **names** every entry that needs attention: ones with no anchors
+(they block forever), and ones whose anchors have all been deleted (nothing is
+left to watch, so they cannot be re-confirmed). Treat that list as work to do — a
+ledger full of unfalsifiable entries is a ledger that will lie to you.
+
+Entry identity is content-derived, so `de merge` is a genuine set union: the same
+refutation recorded by a teammate, or by you on another machine, carries the same
+id and merges cleanly.
+
+## The ledger is not allowed to lie
+
+`record` refuses four things, and each refusal exists because the alternative is
+an entry that misleads later:
+
+| Refusal | Why it would have lied |
+|---|---|
+| no anchors | it could never expire, so it blocks forever |
+| a missing anchor path | it would never be watched |
+| a directory covering **zero** files | its manifest can never change — undecayable, while looking anchored |
+| `--unanchored` **with** `--anchor` | anchors stored but never checked |
+
+If you hit one of these, the fix is to name the file whose change would falsify
+the claim — not to reach for `--unanchored`.
 
 ## When not to use this
 

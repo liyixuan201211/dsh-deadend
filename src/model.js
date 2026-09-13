@@ -14,6 +14,7 @@
  * @property {string} path Repo-relative, posix-separated.
  * @property {string} hash `sha256:<hex>` of the file, or of a sorted manifest for a directory.
  * @property {"file" | "dir"} kind
+ * @property {number} [files] For a directory, how many files the manifest covered.
  *
  * @typedef {object} AnchorCheck
  * @property {string} path
@@ -150,8 +151,15 @@ export function replay(lines) {
         entry.status = "active";
         entry.retiredAt = null;
         entry.retireReason = null;
-        if (ev.anchors) entry.anchors = ev.anchors;
-        if (entry.decay === "none" && ev.anchors) entry.decay = "anchored";
+        // Both guards need an explicit length check: an empty array is truthy,
+        // so `if (ev.anchors)` would let a re-confirmation of an anchorless
+        // entry (a) blank its anchors and (b) flip `decay` to "anchored". The
+        // entry would then look properly anchored while still blocking forever,
+        // and `status` would stop warning about it.
+        if (ev.anchors && ev.anchors.length > 0) {
+          entry.anchors = ev.anchors;
+          if (entry.decay === "none") entry.decay = "anchored";
+        }
       }
       entry.updatedAt = ev.at;
       entry.history.push({ at: ev.at, event: ev.outcome, note: ev.note ?? null });

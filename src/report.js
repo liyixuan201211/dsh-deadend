@@ -298,14 +298,17 @@ export function renderStatus(summary) {
   out.push(`  suspect  ${summary.suspect}`);
   out.push(`  retired  ${summary.retired}`);
 
-  if (summary.undecayable > 0) {
+  if (summary.attention.length > 0) {
     out.push("");
     out.push(
-      summary.undecayable === 1
-        ? "⚠ 1 entry has no anchors — it can never expire."
-        : `⚠ ${summary.undecayable} entries have no anchors — none of them can expire.`,
+      summary.attention.length === 1
+        ? "⚠ 1 entry needs attention:"
+        : `⚠ ${summary.attention.length} entries need attention:`,
     );
-    out.push("  They block forever. Anchor them, or retire them.");
+    for (const item of summary.attention) {
+      out.push(`    ${item.id}  ${item.title}`);
+      out.push(`        ${item.why}`);
+    }
   }
 
   if (summary.total > 0) {
@@ -355,8 +358,8 @@ export function renderRecord(result, ledgerRelative) {
       "",
       `  ${result.existing.title}`,
       "",
-      "Use `deadend verify` to re-confirm it, or pass --force to record a",
-      "separate entry.",
+      "Use `deadend verify` to re-confirm it, or --force to replace this entry",
+      "with the new observation (the existing history is kept).",
       "",
     ].join("\n");
   }
@@ -390,6 +393,36 @@ export function renderRecord(result, ledgerRelative) {
     ].join("\n");
   }
 
+  if (result.reason === "empty-anchors") {
+    return [
+      "These anchors cover no files, so their content could never change:",
+      ...result.paths.map((p) => `  ${p}`),
+      "",
+      "A directory anchor watches the files inside it. A directory with nothing",
+      "tracked in it — empty, or entirely gitignored — is an anchor that can never",
+      "decay: an entry that blocks forever while looking properly anchored.",
+      "",
+      "Anchor a specific file or a parent directory instead, or pass --unanchored",
+      "to say plainly that this claim has no local falsifier.",
+      "",
+    ].join("\n");
+  }
+
+  if (result.reason === "conflicting-anchors") {
+    return [
+      "Anchors and --unanchored contradict each other.",
+      "",
+      "An anchor means \"expire when this changes\". --unanchored means \"never",
+      "expire\". Accepting both would store anchors that are displayed but never",
+      "checked — worse than either, because it looks like diligence.",
+      "",
+      "Pick one:",
+      ...result.anchors.map((a) => `  --anchor ${a}`),
+      "  --unanchored",
+      "",
+    ].join("\n");
+  }
+
   return "A dead end needs a title (`--title`).\n";
 }
 
@@ -408,15 +441,31 @@ export function renderVerify(result) {
       "",
     ].join("\n");
   }
-  return [
-    `Re-confirmed ${result.entry.id} — still fails.`,
-    "",
-    `    anchors re-pinned to the current tree (${plural(result.anchors.length, "anchor")})`,
-    ...result.anchors.map((a) => `      ✓ ${a.path}`),
-    "",
-    "It is authoritative again, and will stay so until one of those changes.",
-    "",
-  ].join("\n");
+
+  /** @type {string[]} */
+  const lines = [`Re-confirmed ${result.entry.id} — still fails.`, ""];
+
+  // Re-confirming only means something if there were anchors to re-pin. Saying
+  // "it is authoritative again" in either of these cases would be false.
+  if (result.entry.decay === "none") {
+    lines.push("⚠ This entry has no anchors, so re-confirming it changed nothing:");
+    lines.push("  it already blocked, and it will keep blocking whatever the code does.");
+    lines.push("  Anchor it if you can, so it is able to expire.");
+  } else if (result.anchors.length === 0) {
+    lines.push("⚠ None of its anchors could be re-hashed — those paths no longer exist.");
+    lines.push("  The entry stays a suspect: there is nothing left to watch, so it cannot");
+    lines.push("  become authoritative again. Restore the paths, or retire it.");
+  } else {
+    lines.push(
+      `    anchors re-pinned to the current tree (${plural(result.anchors.length, "anchor")})`,
+    );
+    for (const a of result.anchors) lines.push(`      ✓ ${a.path}`);
+    lines.push("");
+    lines.push("It is authoritative again, and will stay so until one of those changes.");
+  }
+
+  lines.push("");
+  return lines.join("\n");
 }
 
 /**
@@ -437,5 +486,32 @@ export function renderGc(result) {
     lines.push("");
     lines.push(`⚠ ${plural(result.undecayable, "kept entry", "kept entries")} cannot expire (no anchors).`);
   }
+  return `${lines.join("\n")}\n`;
+}
+
+/**
+ * @param {import("./engine.js").MergeResult} result
+ * @param {string} ledgerRelative
+ * @returns {string}
+ */
+export function renderMerge(result, ledgerRelative) {
+  /** @type {string[]} */
+  const lines = [
+    "Merged other ledgers into this one:",
+    `  added      ${result.added}`,
+    `  updated    ${result.updated}`,
+    `  unchanged  ${result.unchanged}`,
+    `  total      ${result.total}`,
+  ];
+
+  if (result.errors.length > 0) {
+    lines.push("");
+    lines.push(`⚠ ${plural(result.errors.length, "incoming line")} could not be read:`);
+    for (const err of result.errors.slice(0, 5)) lines.push(`    ${err}`);
+  }
+
+  lines.push("");
+  lines.push(`The ledger was rewritten compacted at ${ledgerRelative}.`);
+
   return `${lines.join("\n")}\n`;
 }

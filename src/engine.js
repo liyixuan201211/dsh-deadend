@@ -14,6 +14,7 @@ import { statSync } from "node:fs";
 
 import { evaluateAnchors, hashPath, hasDecayed, suggestAnchors } from "./anchors.js";
 import { signature } from "./fingerprint.js";
+import { replay } from "./model.js";
 import { append, load, ledgerPath, writeAll } from "./ledger.js";
 import { commandFamily, jaccard, normalizeCommand, nowIso, sha256, tokenize } from "./util.js";
 
@@ -215,8 +216,10 @@ export function check(root, query) {
  * @typedef {{ ok: false, reason: "empty-title" }} RecordEmptyTitle
  * @typedef {{ ok: false, reason: "no-anchors", suggestions: string[] }} RecordNoAnchors
  * @typedef {{ ok: false, reason: "missing-anchors", missing: string[] }} RecordMissingAnchors
+ * @typedef {{ ok: false, reason: "empty-anchors", paths: string[] }} RecordEmptyAnchors
+ * @typedef {{ ok: false, reason: "conflicting-anchors", anchors: string[] }} RecordConflicting
  * @typedef {{ ok: false, reason: "duplicate", existing: DeadEnd }} RecordDuplicate
- * @typedef {RecordOk | RecordEmptyTitle | RecordNoAnchors | RecordMissingAnchors | RecordDuplicate} RecordResult
+ * @typedef {RecordOk | RecordEmptyTitle | RecordNoAnchors | RecordMissingAnchors | RecordEmptyAnchors | RecordConflicting | RecordDuplicate} RecordResult
  */
 
 /**
@@ -249,6 +252,14 @@ export function record(root, input) {
 
   const requested = (input.anchors ?? []).map((p) => p.trim()).filter(Boolean);
 
+  // Anchors and --unanchored are contradictory: the first says "expire when this
+  // changes", the second says "never expire". Accepting both would store anchors
+  // that get displayed but never checked — worse than either, because it looks
+  // like diligence while behaving like an entry that can never decay.
+  if (input.unanchored && requested.length > 0) {
+    return { ok: false, reason: "conflicting-anchors", anchors: requested };
+  }
+
   // The discipline that makes the tool worth having: a dead end with nothing to
   // watch can never expire, and an expiry-proof block is indistinguishable
   // from a bug. So we refuse to create one silently.
@@ -264,12 +275,25 @@ export function record(root, input) {
   const anchors = [];
   /** @type {string[]} */
   const missing = [];
+  /** @type {string[]} */
+  const empty = [];
   for (const path of requested) {
     const anchor = hashPath(root, path);
-    if (anchor) anchors.push(anchor);
-    else missing.push(path);
+    if (!anchor) {
+      missing.push(path);
+      continue;
+    }
+    // A directory covering no files has a manifest that can never change, so
+    // the anchor would never fire. That is an undecayable entry wearing the
+    // costume of a properly anchored one — refuse it rather than store a lie.
+    if (anchor.kind === "dir" && (anchor.files ?? 0) === 0) {
+      empty.push(path);
+      continue;
+    }
+    anchors.push(anchor);
   }
   if (missing.length > 0) return { ok: false, reason: "missing-anchors", missing };
+  if (empty.length > 0) return { ok: false, reason: "empty-anchors", paths: empty };
 
   const normalized = input.command ? normalizeCommand(input.command) : null;
   const family = input.command ? commandFamily(input.command) : null;
@@ -310,15 +334,17 @@ export function record(root, input) {
     status: "active",
     retiredAt: null,
     retireReason: null,
-    notes: [],
-    // Carrying history across a recurrence keeps the audit trail: this id was
-    // once believed fixed and came back.
+    // Carrying notes and history across a recurrence keeps the audit trail:
+    // this id was once believed fixed and came back.
+    notes: existing ? [...existing.notes] : [],
     history: existing?.history ? [...existing.history] : [],
   };
 
   if (existing) {
-    entry.notes.push(`re-recorded ${at} (the failure came back)`);
-    entry.history.push({ at, event: "re-record", note: "failure recurred" });
+    const why =
+      existing.status === "retired" ? "the failure came back" : "re-recorded with --force";
+    entry.notes.push(`re-recorded (${why})`);
+    entry.history.push({ at, event: "re-record", note: why });
   }
 
   append(root, { v: 1, event: "record", at, entry });
@@ -447,10 +473,129 @@ export function gc(root, options = {}, dryRun = false) {
 }
 
 /* ------------------------------------------------------------------ *
+ * merge
+ * ------------------------------------------------------------------ */
+
+/**
+ * @typedef {object} MergeResult
+ * @property {number} added
+ * @property {number} updated
+ * @property {number} unchanged
+ * @property {number} total
+ * @property {string[]} errors
+ */
+
+/**
+ * Union two histories by observation rather than by position.
+ *
+ * @param {import("./model.js").HistoryEntry[]} a
+ * @param {import("./model.js").HistoryEntry[]} b
+ * @returns {import("./model.js").HistoryEntry[]}
+ */
+function unionHistory(a, b) {
+  const seen = new Set();
+  const out = [];
+  for (const h of [...a, ...b]) {
+    const key = `${h.at}|${h.event}|${h.note ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(h);
+  }
+  return out.sort((x, y) => x.at.localeCompare(y.at));
+}
+
+/**
+ * Fold a foreign entry into a local one.
+ *
+ * The more recently updated claim wins on status and anchors, because it is the
+ * later observation; histories and notes are unioned so neither side loses one.
+ * Returns the original object untouched when nothing changed, so the caller can
+ * report "unchanged" honestly instead of inflating the numbers.
+ *
+ * @param {DeadEnd} mine
+ * @param {DeadEnd} theirs
+ * @returns {DeadEnd}
+ */
+function mergeEntries(mine, theirs) {
+  const preferTheirs = Date.parse(theirs.updatedAt) > Date.parse(mine.updatedAt);
+  const newer = preferTheirs ? theirs : mine;
+  const older = preferTheirs ? mine : theirs;
+
+  const history = unionHistory(older.history, newer.history);
+  const notes = [...new Set([...older.notes, ...newer.notes])];
+
+  if (!preferTheirs && history.length === mine.history.length && notes.length === mine.notes.length) {
+    return mine;
+  }
+
+  return { ...structuredClone(newer), history, notes };
+}
+
+/**
+ * Merge other ledgers into this one, then rewrite compacted.
+ *
+ * Entry identity is content-derived, so the same refutation recorded twice —
+ * by two teammates, or by you on two machines — has the same id, and merging is
+ * a set union rather than a de-duplication problem. That is what makes
+ * committing the ledger to a shared repository workable.
+ *
+ * @param {string} root
+ * @param {string[]} ledgerTexts Raw contents of other ledgers.
+ * @returns {MergeResult}
+ */
+export function merge(root, ledgerTexts) {
+  const byId = new Map(load(root).entries.map((e) => [e.id, e]));
+  /** @type {string[]} */
+  const errors = [];
+  let added = 0;
+  let updated = 0;
+  let unchanged = 0;
+
+  for (const text of ledgerTexts) {
+    const foreign = replay(text.split("\n"));
+    errors.push(...foreign.errors);
+
+    for (const entry of foreign.entries) {
+      const mine = byId.get(entry.id);
+      if (!mine) {
+        byId.set(entry.id, structuredClone(entry));
+        added += 1;
+        continue;
+      }
+      const merged = mergeEntries(mine, entry);
+      if (merged === mine) {
+        unchanged += 1;
+      } else {
+        byId.set(entry.id, merged);
+        updated += 1;
+      }
+    }
+  }
+
+  /** @type {LedgerEvent[]} */
+  const events = [...byId.values()].map((entry) => ({
+    v: 1,
+    event: "record",
+    at: entry.createdAt,
+    entry,
+  }));
+  writeAll(root, events);
+
+  return { added, updated, unchanged, total: byId.size, errors };
+}
+
+/* ------------------------------------------------------------------ *
  * status
  * ------------------------------------------------------------------ */
 
 /**
+ * Something the ledger is telling you to fix, named rather than counted.
+ *
+ * @typedef {object} Attention
+ * @property {string} id
+ * @property {string} title
+ * @property {string} why
+ *
  * @typedef {object} StatusSummary
  * @property {string} root
  * @property {string} ledger
@@ -461,6 +606,7 @@ export function gc(root, options = {}, dryRun = false) {
  * @property {number} undecayable
  * @property {string | null} oldest
  * @property {string | null} newest
+ * @property {Attention[]} attention
  * @property {string[]} errors
  */
 
@@ -474,6 +620,27 @@ export function summarize(root) {
   const at = (v) => v.entry.updatedAt || v.entry.createdAt;
   const times = views.map(at).sort();
 
+  // Naming the specific entries is the difference between a warning people act
+  // on and a warning people scroll past.
+  /** @type {Attention[]} */
+  const attention = [];
+  for (const v of views) {
+    if (v.effectiveStatus === "retired") continue;
+    if (v.entry.decay === "none") {
+      attention.push({
+        id: v.entry.id,
+        title: v.entry.title,
+        why: "no anchors — blocks forever and can never expire; anchor it or retire it",
+      });
+    } else if (v.checks.length > 0 && v.checks.every((c) => c.state === "missing")) {
+      attention.push({
+        id: v.entry.id,
+        title: v.entry.title,
+        why: "every anchor is gone — nothing left to watch, so it cannot be re-confirmed",
+      });
+    }
+  }
+
   return {
     root,
     ledger: ledgerPath(root),
@@ -484,6 +651,7 @@ export function summarize(root) {
     undecayable: views.filter((v) => v.entry.decay === "none").length,
     oldest: times[0] ?? null,
     newest: times[times.length - 1] ?? null,
+    attention,
     errors,
   };
 }

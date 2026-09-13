@@ -167,7 +167,7 @@ test("a different command with the same failure output is still caught", (t) => 
   // ...but the signature can, which is the whole point of fingerprinting.
   const bySignature = check(box.dir, {
     command: "pnpm add sharp",
-    fingerprint: signature(SHARP_LOG_OTHER_MACHINE).fingerprint,
+    fingerprint: signature(SHARP_LOG_OTHER_MACHINE).fingerprint ?? undefined,
   });
   assert.equal(bySignature.verdict, "blocked");
   assert.match(bySignature.matches[0]?.reasons.join(" ") ?? "", /identical failure signature/);

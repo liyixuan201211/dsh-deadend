@@ -154,7 +154,8 @@ deadend record  -t TITLE [--cmd C] [--exit N] [--log F|-] [--why W] [--retry R]
 deadend verify  <id> (--still-fails | --now-works) [--log F] [--note N]
 deadend list    [--status active|suspect|retired] [--all] [--json]
 deadend show    <id> [--json]
-deadend status  [--json]
+deadend status  [--json]        counts, plus the entries that need attention
+deadend merge   <ledger.jsonl...>                (use - for stdin)
 deadend gc      [--dry-run] [--drop-retired] [--drop-undecayable]
 deadend init
 ```
@@ -204,6 +205,53 @@ paths)`), so two clones that record the same refutation produce the same id and
 merging ledgers is a set union, not a de-duplication problem.
 
 Full format: [`skills/deadend/reference/schema.md`](skills/deadend/reference/schema.md).
+
+## Merging ledgers
+
+Identity is content-derived, so the same refutation recorded twice — by two
+teammates, or by you on two machines — has the same id, and merging is a set
+union rather than a de-duplication problem. That is what makes committing the
+ledger to a shared repository workable in the first place.
+
+```bash
+deadend merge ../other-clone/.deadend/ledger.jsonl   # or - for stdin
+#   added     3
+#   updated    1
+#   unchanged  7
+#   total     11
+```
+
+When both sides know an id, the more recently updated observation wins on status
+and anchors, and histories and notes are unioned so neither side loses one.
+
+## Use it in CI
+
+`check` reports through its exit code, so the ledger becomes a gate in one line:
+
+```yaml
+- name: Do not re-run a known dead end
+  run: |
+    npx --yes github:liyixuan201211/dsh-deadend check --cmd "npm install sharp" -q
+    # exit 3 = still authoritative: fail
+    # exit 4 = anchors changed: re-test, do not fail
+    # exit 0 = clear
+```
+
+And because an unfalsifiable entry is the failure mode this tool exists to
+prevent, it is worth failing the build when the ledger itself drifts:
+
+```yaml
+- name: Keep the ledger falsifiable
+  run: |
+    npx --yes github:liyixuan201211/dsh-deadend status --json > ledger.json
+    node -e '
+      const j = require("./ledger.json");
+      if (j.attention.length > 0) {
+        console.error("ledger needs attention:");
+        for (const a of j.attention) console.error("  " + a.id + "  " + a.why);
+        process.exit(1);
+      }'
+```
 
 ## Honest positioning
 
@@ -269,7 +317,7 @@ types for files inside `node_modules`, which is precisely where the package land
 when it is installed or run through `npx`. The `installable` CI job guards that.)
 
 ```bash
-npm test            # 58 tests
+npm test            # 74 tests
 npm run typecheck   # tsc --noEmit over the JSDoc types
 npm run check       # both
 ```

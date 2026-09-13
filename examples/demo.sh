@@ -92,4 +92,8 @@ run show dd_
 banner "10. The guard that makes this work: no anchors, no entry (exit 5)"
 run record --title "go build fails on cgo" --cmd "go build ./..."
 
+banner "11. ...unless the claim truly has no local falsifier — then say so, and status keeps saying it"
+run record --title "vendor API rejects batches over 100 rows" --cmd "curl -X POST /batch" --unanchored
+run status
+
 banner "Done. The ledger is .deadend/ledger.jsonl — commit it."

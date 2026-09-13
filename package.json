@@ -1,6 +1,6 @@
 {
   "name": "dsh-deadend",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A refutation ledger for coding agents: remember what did not work, and expire it automatically when the code it depended on changes.",
   "license": "MIT",
   "type": "module",

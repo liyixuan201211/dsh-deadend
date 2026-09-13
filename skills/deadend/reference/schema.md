@@ -174,7 +174,26 @@ stay readable.
 |---|---|
 | `0` | clear, or the command succeeded |
 | `1` | unexpected error |
-| `2` | usage error |
+| `2` | usage error — including an unreadable `--log` path or a non-integer `--exit` |
 | `3` | **blocked** — a recorded dead end matches and is still authoritative |
 | `4` | **suspect** — a recorded dead end matches, but its anchors changed |
-| `5` | **refused** — `record` declined (no anchors, missing anchor, or duplicate) |
+| `5` | **refused** — `record` declined, for one of four reasons below |
+
+An unreadable `--log` is a usage error rather than a silent omission: dropping
+the log silently would downgrade the check from signature matching to command
+matching, and a typo in a path could turn a BLOCKED into a CLEAR.
+
+### Why `record` refuses
+
+| Reason | Condition |
+|---|---|
+| `no-anchors` | no `--anchor` and no `--unanchored` |
+| `missing-anchors` | an anchor path does not exist |
+| `empty-anchors` | a directory anchor covers **zero** files, so its manifest can never change |
+| `conflicting-anchors` | `--unanchored` passed **together with** `--anchor` |
+| `duplicate` | an entry with the same content-derived id is already live |
+
+Each refusal is a case where the entry would have misled later: a dead end that
+can never expire while looking properly anchored, or anchors that are displayed
+but never checked.
+
